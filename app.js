@@ -251,12 +251,16 @@ function authGate() {
     <form data-form="recover"><label for="np">Nuova password (almeno 6 caratteri)</label>
     <input id="np" type="password" autocomplete="new-password" minlength="6" required>
     <button class="btn pri big" type="submit" style="margin-top:20px">Salva password</button></form>`);
+  if (S.user && !getName()) return gateShell(`<h1>Come ti chiami?</h1><p class="mut">Lo useremo per salutarti ogni giorno.</p>
+    <form data-form="name"><label for="nm">Nome</label><input id="nm" maxlength="30" autocomplete="given-name" required>
+    <button class="btn pri big" type="submit" style="margin-top:22px">Continua</button></form>`);
   if (!S.user) {
     const up = S.authMode === 'up';
     return gateShell(`<h1>Kegel Coach</h1>
     <p class="mut">Cinque minuti al giorno per allenare i muscoli pelvici.</p>
     <nav class="subtabs" aria-label="Accesso"><button class="${up ? '' : 'on'}" data-act="authMode" data-id="in">Accedi</button><button class="${up ? 'on' : ''}" data-act="authMode" data-id="up">Registrati</button></nav>
     <form data-form="auth">
+      ${up ? '<label for="nm">Come ti chiami?</label><input id="nm" maxlength="30" autocomplete="given-name" required>' : ''}
       <label for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email" required>
       <label for="pw">Password${up ? ' (almeno 6 caratteri)' : ''}</label><input id="pw" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" minlength="6" required>
       <button class="btn pri big" type="submit" style="margin-top:22px">${up ? 'Crea account' : 'Accedi'}</button>
@@ -265,6 +269,17 @@ function authGate() {
     <p class="fine">Gli esercizi non sostituiscono il parere medico.</p>`);
   }
   return null;
+}
+const getName = () => (cloud() ? S.user.user_metadata?.name : S.settings.name) || '';
+const cleanName = v => String(v || '').trim().replace(/\s+/g, ' ').slice(0, 30);
+async function setName(name) {
+  name = cleanName(name);
+  if (!name) throw new Error('Scrivi il tuo nome');
+  if (cloud()) {
+    const { data, error } = await sb.auth.updateUser({ data: { name } });
+    if (error) throw error;
+    S.user = data?.user || { ...S.user, user_metadata: { ...S.user.user_metadata, name } };
+  } else { S.settings.name = name; saveSettings(); }
 }
 const gateShell = inner => `<section class="gate"><div class="gate-orb" aria-hidden="true"></div>${inner}</section>`;
 
@@ -311,7 +326,7 @@ function vHome() {
     : `<p class="note">${st.best > st.streak ? `Il tuo record è ${st.best} giorni.` : st.streak ? 'Questo è il tuo record. Continua così.' : 'Il primo allenamento avvia la serie.'}</p>`;
   return `
   <section class="hero">
-    <p class="greet">${greeting()}</p>
+    <p class="greet">${greeting()}${getName() ? ', ' + esc(getName()) : ''}</p>
     <h1>${st.doneToday ? 'Per oggi hai finito.' : 'Pronto per oggi?'}</h1>
     <button class="breath" data-act="startProgram" data-id="${rec.id}" aria-label="Inizia il programma ${esc(rec.name)}">
       <span>${st.doneToday ? 'Ancora una' : 'Inizia'}</span><small>${esc(rec.name)} · ${mins}</small></button>
@@ -443,9 +458,11 @@ function vProfile() {
   if (!sb) {
     acct = `<div class="block"><h2>Modalità locale</h2><p class="sm mut" style="margin-top:6px">Supabase non è configurato: i dati restano su questo dispositivo. Inserisci URL e chiave in <code>config.js</code> per attivare gli account.</p></div>`;
   } else if (S.user) {
-    acct = `<div class="block"><h2>Account</h2><p style="margin-top:6px">Connesso come <b>${esc(S.user.email)}</b></p>
+    acct = `<div class="block"><h2>Account</h2>
+      <div class="list-i" style="border:0;padding-bottom:0"><span>Nome</span><span><b>${esc(getName())}</b> <button class="link" data-act="editName">Modifica</button></span></div>
+      <div class="list-i" style="border:0;padding-top:4px"><span>Email</span><b>${esc(S.user.email)}</b></div>
       <p class="sm mut">I dati sono salvati nel cloud e sincronizzati tra i dispositivi.</p>
-      <button class="btn ghost danger" style="margin-top:14px" data-act="signout">Esci</button></div>`;
+      <button class="btn ghost" style="margin-top:14px" data-act="signout">Esci</button></div>`;
   } else {
     acct = `<div class="block"><h2>Accedi o registrati</h2>
       <p class="sm mut" style="margin-top:6px">Con un account salvi esercizi, punteggi e trofei nel cloud.</p>
@@ -456,7 +473,10 @@ function vProfile() {
   const data = `<div class="block"><h2>I tuoi dati</h2><div class="row wrap" style="margin-top:12px">
     <button class="btn ghost sm" data-act="export">Esporta in JSON</button>
     ${!cloud() ? '<button class="btn ghost danger sm" data-act="resetLocal">Cancella dati locali</button>' : ''}</div></div>`;
-  return `<h1>Profilo</h1>${acct}${settings}${data}
+  const danger = cloud() ? `<div class="block"><h2>Elimina account</h2>
+    <p class="sm mut" style="margin-top:6px">Cancella in modo definitivo il tuo account, gli esercizi, i punteggi e i trofei. Non si può annullare.</p>
+    <button class="btn ghost danger" style="margin-top:14px" data-act="deleteAccount">Elimina il mio account</button></div>` : '';
+  return `<h1>Profilo</h1>${acct}${settings}${data}${danger}
     <p class="fine">Gli esercizi non sostituiscono il parere medico.</p>`;
 }
 
@@ -619,10 +639,11 @@ async function authDo(kind) {
   const email = $('#em')?.value.trim(), password = $('#pw')?.value;
   if (!email || !password) return toast('Inserisci email e password', 'err');
   if (password.length < 6) return toast('La password deve avere almeno 6 caratteri', 'err');
+  if (kind === 'up' && !cleanName($('#nm')?.value)) return toast('Scrivi il tuo nome', 'err');
   const btn = $('form[data-form=auth] button[type=submit]'); if (btn) btn.disabled = true;
   try {
     if (kind === 'up') {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname, data: { name: cleanName($('#nm')?.value) } } });
       if (error) return toast(authMsg(error), 'err');
       if (!data.session) { toast('Quasi fatto: controlla la tua email e conferma l\'account, poi accedi.'); S.authMode = 'in'; render(); }
     } else {
@@ -686,6 +707,29 @@ const ACTS = {
   saveRun,
   runNext: () => { R.qi++; loadExercise(); },
   runDone: endRun,
+  editName: () => {
+    $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Cambia nome">
+      <h2>Come vuoi essere chiamato?</h2>
+      <form data-form="rename"><label for="rn">Nome</label><input id="rn" maxlength="30" value="${esc(getName())}" required>
+      <div class="row" style="margin-top:20px"><button type="button" class="btn ghost grow" data-act="closeModal">Annulla</button><button class="btn pri grow" type="submit">Salva</button></div></form></div></div>`;
+  },
+  deleteAccount: () => {
+    $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Elimina account">
+      <h2>Eliminare l'account?</h2>
+      <p class="mut" style="margin-top:6px">Verranno cancellati in modo definitivo account, esercizi, punteggi e trofei.</p>
+      <label for="del">Per confermare scrivi ELIMINA</label><input id="del" autocomplete="off" autocapitalize="characters">
+      <div class="row" style="margin-top:20px"><button class="btn ghost grow" data-act="closeModal">Annulla</button><button class="btn warn grow" data-act="confirmDelete">Elimina</button></div></div></div>`;
+  },
+  confirmDelete: async el => {
+    if ($('#del').value.trim().toUpperCase() !== 'ELIMINA') return toast('Scrivi ELIMINA per confermare', 'err');
+    el.disabled = true;
+    const { error } = await sb.rpc('delete_my_account');
+    if (error) { el.disabled = false; return toast('Eliminazione non riuscita. Controlla di aver eseguito lo SQL "delete_account.sql" su Supabase.', 'err'); }
+    closeModal();
+    try { await sb.auth.signOut({ scope: 'local' }); } catch { /* utente già rimosso */ }
+    S.user = null; S.sessions = []; S.customs = []; S.trophies = {}; S.authMode = 'in';
+    location.hash = '#/home'; render(); toast('Account eliminato.');
+  },
   authMode: el => { S.authMode = el.dataset.id; render(); },
   forgot: async () => {
     const email = $('#em')?.value.trim();
@@ -720,6 +764,12 @@ document.addEventListener('submit', async e => {
   const f = e.target.dataset?.form; if (!f) return;
   e.preventDefault();
   if (f === 'auth') authDo(S.authMode === 'up' ? 'up' : 'in');
+  if (f === 'name') {
+    try { await setName($('#nm').value); render(); } catch (err) { toast(err.message, 'err'); }
+  }
+  if (f === 'rename') {
+    try { await setName($('#rn').value); closeModal(); render(); toast('Nome aggiornato'); } catch (err) { toast(err.message, 'err'); }
+  }
   if (f === 'recover') {
     const password = $('#np').value;
     const { error } = await sb.auth.updateUser({ password });

@@ -68,3 +68,21 @@ grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.custom_exercises to authenticated;
 grant select, insert, update, delete on public.sessions         to authenticated;
 grant select, insert, update, delete on public.user_trophies    to authenticated;
+
+-- 6) Eliminazione account (vedi anche supabase/delete_account.sql)
+create or replace function public.delete_my_account()
+returns void
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+
+revoke all on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;

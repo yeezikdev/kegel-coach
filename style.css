@@ -227,3 +227,5 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--sea)}
   background:radial-gradient(circle at 34% 28%,color-mix(in srgb,var(--sea) 55%,#fff),var(--sea) 62%,color-mix(in srgb,var(--sea) 80%,#000));
   box-shadow:0 0 0 10px color-mix(in srgb,var(--sea) 12%,transparent),0 0 0 22px color-mix(in srgb,var(--sea) 6%,transparent);animation:breathe 8s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.gate-orb{animation:none}}
+
+.btn.warn{background:var(--bad);color:var(--bg)}
