@@ -20,7 +20,7 @@ const sb = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)
 /* ───────── stato ───────── */
 const S = {
   user: null, sessions: [], customs: [], trophies: {},
-  showAll: false, endImgs: [], endImgsAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
+  showAll: false, endImgs: [], endImgsAt: 0, gifUrl: '', gifAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
   settings: { sound: true, vibrate: true },
 };
 const LS = 'kegel-coach:v1', LSS = 'kegel-coach:settings';
@@ -506,13 +506,21 @@ function vProfile() {
       <label for="pw">Password (almeno 6 caratteri)</label><input id="pw" type="password" autocomplete="current-password">
       <div class="row" style="margin-top:18px"><button class="btn pri grow" data-act="signin">Accedi</button><button class="btn ghost grow" data-act="signup">Registrati</button></div></div>`;
   }
+  const gifBlock = cloud() ? `<div class="block"><h2>Animazione durante la contrazione</h2>
+    <p class="sm mut" style="margin-top:6px">Una GIF animata (o un'immagine) che compare dentro il cerchio quando devi contrarre. La vedi solo tu.</p>
+    ${S.gifUrl ? `<div class="gif-prev"><img src="${esc(S.gifUrl)}" alt="Anteprima animazione"></div>` : ''}
+    <div class="row wrap" style="margin-top:12px">
+      <label class="btn ghost sm" for="gifFile" style="cursor:pointer">${S.gifUrl ? 'Cambia' : 'Carica una GIF'}</label>
+      <input id="gifFile" type="file" accept="image/gif,image/webp,image/png,image/jpeg" data-change="gifFile" hidden>
+      ${S.gifUrl ? '<button class="btn ghost danger sm" data-act="delGif">Rimuovi</button>' : ''}</div>
+    <p class="fine" style="margin-top:8px">GIF, WebP, PNG o JPG · massimo 25 MB.</p></div>` : '';
   const data = `<div class="block"><h2>I tuoi dati</h2><div class="row wrap" style="margin-top:12px">
     <button class="btn ghost sm" data-act="export">Esporta in JSON</button>
     ${!cloud() ? '<button class="btn ghost danger sm" data-act="resetLocal">Cancella dati locali</button>' : ''}</div></div>`;
   const danger = cloud() ? `<div class="block"><h2>Elimina account</h2>
     <p class="sm mut" style="margin-top:6px">Cancella in modo definitivo il tuo account, gli esercizi, i punteggi e i trofei. Non si può annullare.</p>
     <button class="btn ghost danger" style="margin-top:14px" data-act="deleteAccount">Elimina il mio account</button></div>` : '';
-  return `<h1>Profilo</h1>${acct}${settings}${data}${danger}
+  return `<h1>Profilo</h1>${acct}${settings}${gifBlock}${data}${danger}
     <p class="fine">Gli esercizi non sostituiscono il parere medico.</p>`;
 }
 
@@ -631,6 +639,7 @@ async function takeWake() { try { wake = await navigator.wakeLock?.request('scre
 function dropWake() { try { wake?.release(); } catch { /* ignore */ } wake = null; }
 
 function startRun(list, programId) {
+  refreshGuideGif();
   if (!list.length) return;
   R = { queue: list, qi: 0, results: [], program: programId || null, timer: null };
   beep(1, .01); // sblocca l'audio su iOS con un gesto utente
@@ -648,7 +657,7 @@ function loadExercise() {
       <div class="t">${R.queue.length > 1 ? `Esercizio ${R.qi + 1} di ${R.queue.length}` : isCircuit(ex) ? 'Circuito' : 'Esercizio'}<b id="r-name">${esc(ex.name)}</b></div>
       <button class="round" id="r-pause" data-act="runPause" aria-label="Pausa">${icon('pause')}</button></div>
     <div class="orb-wrap"><svg viewBox="0 0 200 200"><circle class="ring-bg" cx="100" cy="100" r="92"/><circle class="ring" id="r-ring" cx="100" cy="100" r="92"/></svg>
-      <div class="orb prep" id="r-orb"></div>
+      <div class="orb prep" id="r-orb"><div class="orb-media" id="r-media"></div></div>
       <div class="orb-txt"><div class="cue" id="r-cue"></div><div class="cnt" id="r-cnt"></div></div></div>
     <div class="run-info" id="r-info"></div>
     <div class="run-hint" id="r-hint"></div>
@@ -668,6 +677,10 @@ function enterStep(first) {
   const st = R.steps[R.i], orb = $('#r-orb');
   if (!orb) return;
   $('#r-run').dataset.phase = st.t;
+  if (S.gifUrl) { // ricrea l'immagine a ogni contrazione: la GIF riparte dall'inizio
+    $('#r-run').dataset.gif = '1';
+    if (st.t === 'contract') $('#r-media').innerHTML = `<img src="${esc(S.gifUrl)}" alt="" onerror="this.remove()">`;
+  }
   orb.style.transitionDuration = Math.min(st.d * .7, 1.6) + 's';
   orb.className = 'orb ' + (st.t === 'contract' ? 'on' : st.t === 'prep' ? 'prep' : '');
   $('#r-cue').textContent = { prep: 'Preparati', contract: 'Contrai', rest: 'Rilascia', setrest: 'Pausa' }[st.t];
@@ -756,6 +769,28 @@ async function loadEndImages() {
     S.endImgsAt = Date.now();
     S.endImgs.forEach(u => { const im = new Image(); im.src = u; }); // precarica
   } catch { S.endImgs = []; }
+}
+/* GIF/immagine mostrata nel cerchio durante la contrazione: bucket privato "guide-media", file <ID utente>/contract.<ext> */
+const GIF_RE = /^contract\.(gif|webp|png|jpe?g)$/i;
+const GIF_EXT = { 'image/gif': 'gif', 'image/webp': 'webp', 'image/png': 'png', 'image/jpeg': 'jpg' };
+async function loadGuideGif() {
+  if (!cloud()) { S.gifUrl = ''; return; }
+  try {
+    const bucket = sb.storage.from('guide-media');
+    const { data: files, error } = await bucket.list(S.user.id, { limit: 20 });
+    const f = !error && files ? files.find(x => GIF_RE.test(x.name)) : null;
+    if (!f) { S.gifUrl = ''; S.gifAt = Date.now(); return; }
+    const { data } = await bucket.createSignedUrl(`${S.user.id}/${f.name}`, 21600);
+    S.gifUrl = data?.signedUrl || ''; S.gifAt = Date.now();
+    if (S.gifUrl) { const im = new Image(); im.src = S.gifUrl; } // precarica
+  } catch { S.gifUrl = ''; }
+}
+const refreshGuideGif = () => { if (cloud() && S.gifUrl && Date.now() - (S.gifAt || 0) > 5 * 3600e3) loadGuideGif(); };
+async function removeGuideGifFiles() {
+  const bucket = sb.storage.from('guide-media');
+  const { data: files } = await bucket.list(S.user.id, { limit: 20 });
+  const old = (files || []).filter(x => GIF_RE.test(x.name)).map(x => `${S.user.id}/${x.name}`);
+  if (old.length) await bucket.remove(old);
 }
 const refreshEndImages = () => { if (cloud() && Date.now() - (S.endImgsAt || 0) > 5 * 3600e3) loadEndImages(); };
 
@@ -888,6 +923,10 @@ const ACTS = {
   saveRun,
   runNext: () => { R.qi++; loadExercise(); },
   runDone: endRun,
+  delGif: async () => {
+    try { await removeGuideGifFiles(); S.gifUrl = ''; render(); toast('Animazione rimossa'); }
+    catch (err) { toast('Non riesco a rimuoverla: ' + (err.message || err), 'err'); }
+  },
   editName: () => {
     $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Cambia nome">
       <h2>Come vuoi essere chiamato?</h2>
@@ -936,11 +975,25 @@ document.addEventListener('click', e => {
   if (el && ACTS[el.dataset.act]) ACTS[el.dataset.act](el, e);
 });
 document.addEventListener('input', e => { if (e.target.closest?.('.editor')) updateTotals(); });
-document.addEventListener('change', e => {
+document.addEventListener('change', async e => {
   if (e.target.closest?.('.editor') && e.target.dataset?.k) { e.target.value = cl(e.target.dataset.k, e.target.value); updateTotals(); return; }
   const k = e.target.dataset?.change; if (!k) return;
   if (k === 'pfEx') { S.pf.ex = e.target.value; render(); }
   else if (k === 'pfRange') { S.pf.range = Number(e.target.value); render(); }
+  else if (k === 'gifFile') {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    const ext = GIF_EXT[file.type];
+    if (!ext) return toast('Formato non supportato: usa GIF, WebP, PNG o JPG.', 'err');
+    if (file.size > 25 * 1048576) return toast('Il file supera i 25 MB.', 'err');
+    toast('Caricamento…');
+    try {
+      await removeGuideGifFiles();
+      const { error } = await sb.storage.from('guide-media').upload(`${S.user.id}/contract.${ext}`, file, { contentType: file.type, upsert: true, cacheControl: '3600' });
+      if (error) throw error;
+      await loadGuideGif(); render(); toast('Animazione salvata');
+    } catch (err) { toast('Caricamento non riuscito: ' + (err.message || err), 'err'); }
+  }
   else if (k === 'sound' || k === 'vibrate') { S.settings[k] = e.target.checked; saveSettings(); }
 });
 document.addEventListener('submit', async e => {
@@ -979,7 +1032,7 @@ if (sb) {
     setTimeout(async () => { // fuori dal callback, come raccomanda Supabase
       await loadData();
       if (u) await maybeImportLocal();
-      if (u) loadEndImages(); else S.endImgs = [];
+      if (u) { loadEndImages(); loadGuideGif(); } else { S.endImgs = []; S.gifUrl = ''; }
       S.ready = true;
       if (u) await checkTrophies();
       if (u && wasOut) location.hash = '#/home';

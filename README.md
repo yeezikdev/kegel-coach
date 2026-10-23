@@ -16,6 +16,10 @@ Senza configurare Supabase funziona comunque in *modalità ospite* (dati nel bro
    "Confirm email" mentre provi.
 5. **GitHub Pages** → crea il repo, carica questi file nella root, poi Settings → Pages → *Deploy from a branch* → `main` / `(root)`.
 
+## GIF durante la contrazione (opzionale)
+
+Esegui `supabase/guide_media.sql` nello SQL Editor (crea il bucket privato `guide-media`). Poi, dall'app: **Profilo → Animazione durante la contrazione → Carica una GIF**. La GIF compare dentro il cerchio quando devi contrarre ed è visibile solo al tuo account.
+
 ## Come funziona il punteggio
 
 `score = (ripetizioni completate / totali) × 70 + (controllo percepito 1-5 / 5) × 30` → 0-100.
