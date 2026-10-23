@@ -622,7 +622,7 @@ async function authDo(kind) {
   const btn = $('form[data-form=auth] button[type=submit]'); if (btn) btn.disabled = true;
   try {
     if (kind === 'up') {
-      const { data, error } = await sb.auth.signUp({ email, password });
+      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
       if (error) return toast(authMsg(error), 'err');
       if (!data.session) { toast('Quasi fatto: controlla la tua email e conferma l\'account, poi accedi.'); S.authMode = 'in'; render(); }
     } else {
