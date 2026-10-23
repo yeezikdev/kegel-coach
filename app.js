@@ -722,7 +722,7 @@ function endImage() { // immagine a rotazione a fine esercizio
   let i = Math.floor(Math.random() * list.length);
   if (list.length > 1 && i === last) i = (i + 1) % list.length;
   try { sessionStorage.setItem('kegel:lastImg', String(i)); } catch { /* ignore */ }
-  return `<img class="end-img" src="${esc(list[i])}" alt="" onerror="this.remove()">`;
+  return `<button type="button" class="end-zoom" data-act="zoomImg" aria-label="Ingrandisci l'immagine"><img class="end-img" src="${esc(list[i])}" alt="" onerror="this.parentElement.remove()"></button>`;
 }
 function endRun() { if (R?.timer) clearInterval(R.timer); R = null; dropWake(); $('#runner').innerHTML = ''; render(); }
 
@@ -782,6 +782,14 @@ const ACTS = {
   editCustom: el => openCustom(el.dataset.id),
   closeModal,
   scoreInfo: openScoreInfo,
+  zoomImg: el => {
+    const src = el.querySelector('img')?.getAttribute('src'); if (!src) return;
+    const box = document.createElement('div');
+    box.id = 'lightbox'; box.dataset.act = 'closeZoom'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Immagine ingrandita');
+    box.innerHTML = `<button type="button" class="round" data-act="closeZoom" aria-label="Chiudi">${icon('close')}</button><img src="${esc(src)}" alt="">`;
+    document.body.appendChild(box);
+  },
+  closeZoom: () => { $('#lightbox')?.remove(); },
   toggleAll: () => { S.showAll = !S.showAll; render(); },
   delSession: async el => {
     const x = S.sessions.find(q => q.id === el.dataset.id); if (!x) return;
@@ -895,7 +903,7 @@ document.addEventListener('submit', async e => {
     S.recovery = false; toast('Password aggiornata.'); location.hash = '#/home'; render();
   }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#modal').innerHTML) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if ($('#lightbox')) $('#lightbox').remove(); else if ($('#modal').innerHTML) closeModal(); });
 
 /* ───────── avvio ───────── */
 let booted = false;
