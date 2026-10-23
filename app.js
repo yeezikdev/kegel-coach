@@ -246,12 +246,23 @@ function render() {
   $('#view').innerHTML = VIEWS[r]();
   document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === r));
   const st = stats();
-  $('#streakChip').textContent = `🔥 ${st.streak}`;
-  $('#userDot').textContent = cloud() ? (S.user.email || 'Account').split('@')[0] : 'Ospite';
+  $('#streakChip').innerHTML = `${icon('flame', 18, true)}${st.streak}`;
 }
 window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
 /* ───────── viste ───────── */
+const IC = {
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  play: '<path d="M8 5.5v13l11-6.5z"/>',
+  pause: '<path d="M9 5v14M15 5v14"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>',
+};
+const icon = (n, s = 22, fill) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Buongiorno' : h < 18 ? 'Buon pomeriggio' : 'Buonasera'; };
+
 function recommended() {
   const n = stats().total;
   return PROGRAMS[n < 10 ? 0 : n < 30 ? 1 : 2];
@@ -259,89 +270,80 @@ function recommended() {
 function vHome() {
   const st = stats(), rec = recommended(), nt = nextTrophy();
   const set = new Set(S.sessions.map(s => s.day));
-  const dots = [...Array(7)].map((_, i) => {
-    const d = addDays(new Date(), i - 6), k = dayStr(d);
-    return `<div class="dot ${set.has(k) ? 'on' : ''} ${k === dayStr() ? 'today' : ''}">${'DLMMGVS'[d.getDay()]}</div>`;
+  const monday = addDays(new Date(), -((new Date().getDay() + 6) % 7)); // la settimana inizia di lunedì
+  const pebbles = [...Array(7)].map((_, i) => {
+    const d = addDays(monday, i), k = dayStr(d);
+    return `<li class="pebble ${set.has(k) ? 'on' : ''} ${k === dayStr() ? 'today' : ''} ${k > dayStr() ? 'fut' : ''}"><i></i><span>${'LMMGVSD'[i]}</span></li>`;
   }).join('');
   const risk = st.streak > 0 && !st.doneToday;
-  const msg = st.doneToday ? 'Obiettivo di oggi completato 🎉'
-    : risk ? `Allenati oggi per non perdere la streak di ${st.streak} ${st.streak === 1 ? 'giorno' : 'giorni'}!`
-    : 'Un allenamento oggi e parte la tua streak.';
-  const last = S.sessions.slice(-1)[0];
+  const exs = rec.ex.map(getEx), mins = minsLabel(exs.reduce((a, e) => a + secsOf(e), 0));
+  const note = risk ? `<p class="note warn">La serie di <b>${st.streak} ${st.streak === 1 ? 'giorno' : 'giorni'}</b> si chiude a mezzanotte.</p>`
+    : `<p class="note">${st.best > st.streak ? `Il tuo record è ${st.best} giorni.` : st.streak ? 'Questo è il tuo record. Continua così.' : 'Il primo allenamento avvia la serie.'}</p>`;
   return `
-  ${sb && !S.user ? `<div class="banner">Stai usando la modalità ospite (dati solo su questo dispositivo). <a href="#/profile">Accedi</a> per salvare tutto nel cloud.</div>` : ''}
-  <div class="card hero">
-    <div class="row between">
-      <div><div class="mut sm">Streak giornaliera</div>
-        <div class="streak-big">🔥 ${st.streak}</div></div>
-      <div class="center"><div class="mut sm">Record</div><b style="font-size:1.5rem">${st.best}</b></div>
-    </div>
-    <div class="week">${dots}</div>
-    <p class="sm ${risk ? '' : 'mut'}" style="margin-top:10px;${risk ? 'color:var(--warn)' : ''}">${msg}</p>
-  </div>
+  ${sb && !S.user ? `<div class="banner">Stai usando la modalità ospite: i dati restano su questo dispositivo. <a href="#/profile">Accedi</a> per salvarli nel cloud.</div>` : ''}
+  <section class="hero">
+    <p class="greet">${greeting()}</p>
+    <h1>${st.doneToday ? 'Per oggi hai finito.' : 'Pronto per oggi?'}</h1>
+    <button class="breath" data-act="startProgram" data-id="${rec.id}" aria-label="Inizia il programma ${esc(rec.name)}">
+      <span>${st.doneToday ? 'Ancora una' : 'Inizia'}</span><small>${esc(rec.name)} · ${mins}</small></button>
+    <p class="hero-sub">${exs.map(e => esc(e.name)).join(', ')}</p>
+  </section>
 
-  <div class="card">
-    <div class="row between wrap"><div><h2>Allenamento consigliato</h2>
-      <p class="mut sm">${esc(rec.name)} · ${rec.ex.map(id => esc(getEx(id).name)).join(' → ')}</p></div>
-      <span class="tag">${esc(rec.tag)}</span></div>
-    <button class="btn pri big" data-act="startProgram" data-id="${rec.id}" style="margin-top:12px">▶ Inizia ora</button>
-  </div>
+  <section class="streak" aria-label="Streak">
+    <div class="streak-num"><b>${st.streak}</b><span>${st.streak === 1 ? 'giorno' : 'giorni'} di fila</span></div>
+    <ul class="pebbles">${pebbles}</ul>
+    ${note}
+  </section>
 
-  ${nt ? `<div class="card"><div class="row">${cup(nt.t.tier)}<div class="grow"><b>${esc(nt.t.name)}</b>
-    <div class="sm mut">${esc(nt.t.desc)} · ${nt.cur}/${nt.tot}</div>
-    <div class="bar" style="margin-top:6px"><i style="width:${Math.min(100, nt.r * 100)}%"></i></div></div></div></div>` : ''}
+  ${nt ? `<section class="next">${cup(nt.t.tier)}<div class="grow"><b>${esc(nt.t.name)}</b>
+    <div class="sm mut">${esc(nt.t.desc)} (${nt.cur}/${nt.tot})</div>
+    <div class="bar"><i style="width:${Math.min(100, nt.r * 100)}%"></i></div></div></section>` : ''}
 
-  <div class="grid3">
-    <div class="stat"><b>${st.total}</b><span>allenamenti</span></div>
-    <div class="stat"><b>${st.avg}</b><span>score medio</span></div>
-    <div class="stat"><b>${last ? last.score : '–'}</b><span>ultimo score</span></div>
-  </div>
-  <p class="sm mut center" style="margin-top:18px">Non è un consiglio medico. Se senti dolore interrompi l'esercizio e parlane con un professionista.</p>`;
+  <section class="figs">
+    <div><b>${st.total}</b><span>allenamenti</span></div>
+    <div><b>${st.avg}</b><span>score medio</span><button class="info-btn mini" data-act="scoreInfo" aria-label="Come si calcola lo score">${icon('info', 16)}</button></div>
+    <div><b>${S.sessions.length ? S.sessions[S.sessions.length - 1].score : '–'}</b><span>ultimo score</span></div>
+  </section>
+  <p class="fine">Non è un consiglio medico. Se senti dolore, interrompi e parlane con un professionista.</p>`;
 }
 
-function exCard(e) {
-  const mine = !!e.custom;
-  return `<div class="card">
-    <div class="row between wrap"><h3>${esc(e.name)}</h3>${mine ? '<span class="tag">Mio</span>' : ''}</div>
-    ${e.description ? `<p class="sm">${esc(e.description)}</p>` : ''}
-    <p class="ex-meta">${exMeta(e)}</p>
-    <div class="row wrap" style="margin-top:10px">
-      <button class="btn pri sm" data-act="startEx" data-id="${esc(e.id)}">▶ Avvia</button>
-      ${mine ? `<button class="btn sm" data-act="editCustom" data-id="${esc(e.id)}">Modifica</button>
-                <button class="btn sm danger" data-act="delCustom" data-id="${esc(e.id)}">Elimina</button>` : ''}
-    </div></div>`;
+function itemRow(title, desc, meta, tag, act, id, extra) {
+  return `<article class="item"><div class="item-main">
+    <h3>${esc(title)}${tag ? `<span class="tag">${esc(tag)}</span>` : ''}</h3>
+    ${desc ? `<p class="desc">${esc(desc)}</p>` : ''}<p class="meta">${meta}</p>${extra || ''}</div>
+    <button class="play" data-act="${act}" data-id="${esc(id)}" aria-label="Avvia ${esc(title)}">${icon('play', 22, true)}</button></article>`;
 }
+const exRow = e => itemRow(e.name, e.description, exMeta(e), e.custom ? 'Mio' : '', 'startEx', e.id,
+  e.custom ? `<div class="item-act"><button class="link" data-act="editCustom" data-id="${esc(e.id)}">Modifica</button><button class="link danger" data-act="delCustom" data-id="${esc(e.id)}">Elimina</button></div>` : '');
+
 function vExercises() {
   const tab = S.exTab;
-  const seg = `<div class="seg">${[['programs', 'Programmi'], ['all', 'Esercizi'], ['mine', `I miei (${S.customs.length})`]]
-    .map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="exTab" data-id="${k}">${l}</button>`).join('')}</div>`;
-  let body = '';
+  const subs = `<nav class="subtabs" aria-label="Sezioni">${[['programs', 'Programmi'], ['all', 'Esercizi'], ['mine', 'I miei']]
+    .map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="exTab" data-id="${k}">${l}</button>`).join('')}</nav>`;
+  let body;
   if (tab === 'programs') {
     body = PROGRAMS.map(p => {
       const exs = p.ex.map(getEx), secs = exs.reduce((a, e) => a + secsOf(e), 0);
-      return `<div class="card"><div class="row between wrap"><h3>${esc(p.name)}</h3><span class="tag">${esc(p.tag)}</span></div>
-        <p class="sm">${esc(p.desc)}</p>
-        <p class="ex-meta">${exs.map(e => esc(e.name)).join(' → ')} · ${minsLabel(secs)}</p>
-        <button class="btn pri sm" style="margin-top:10px" data-act="startProgram" data-id="${p.id}">▶ Avvia programma</button></div>`;
+      return itemRow(p.name, p.desc, `${exs.map(e => esc(e.name)).join(', ')} · ${minsLabel(secs)}`, p.tag, 'startProgram', p.id);
     }).join('');
   } else if (tab === 'all') {
-    body = allEx().map(exCard).join('');
+    body = allEx().map(exRow).join('');
   } else {
-    body = `<button class="btn pri big" data-act="newCustom" style="margin-bottom:14px">＋ Crea esercizio</button>` +
-      (S.customs.length ? S.customs.map(exCard).join('') : `<div class="empty">Non hai ancora esercizi personalizzati.<br>Scegli tu durata di contrazione, riposo, ripetizioni e serie.</div>`);
+    body = `<button class="btn pri add" data-act="newCustom">${'Crea un esercizio'}</button>` +
+      (S.customs.length ? S.customs.map(exRow).join('') : `<p class="empty">Qui compariranno i tuoi esercizi.<br>Scegli tu contrazione, riposo, ripetizioni e serie.</p>`);
   }
-  return `<h1>Esercizi</h1>${seg}${body}`;
+  return `<h1>Esercizi</h1>${subs}${body}`;
 }
 
 function chartSvg(points) {
-  if (points.length < 2) return `<div class="empty">Servono almeno 2 giorni di allenamento per il grafico.</div>`;
+  if (points.length < 2) return `<p class="empty">Servono almeno due giorni di allenamento per vedere il grafico.</p>`;
   const W = 600, H = 240, p = { l: 38, r: 14, t: 12, b: 30 };
   const t0 = points[0].x.getTime(), t1 = points[points.length - 1].x.getTime();
   const X = d => p.l + (t1 === t0 ? 0 : (d.getTime() - t0) / (t1 - t0)) * (W - p.l - p.r);
   const Y = v => p.t + (1 - v / 100) * (H - p.t - p.b);
   const line = points.map((q, i) => `${i ? 'L' : 'M'}${X(q.x).toFixed(1)},${Y(q.y).toFixed(1)}`).join('');
   const area = `${line}L${X(points[points.length - 1].x).toFixed(1)},${Y(0)}L${X(points[0].x).toFixed(1)},${Y(0)}Z`;
-  const grid = [0, 25, 50, 75, 100].map(v => `<line class="grid" x1="${p.l}" x2="${W - p.r}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${p.l - 6}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`).join('');
+  const grid = [0, 50, 100].map(v => `<line class="grid" x1="${p.l}" x2="${W - p.r}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${p.l - 8}" y="${Y(v) + 5}" text-anchor="end">${v}</text>`).join('');
   const dots = points.map(q => `<circle class="pt" cx="${X(q.x).toFixed(1)}" cy="${Y(q.y).toFixed(1)}" r="4"><title>${fmtDate(q.x)}: ${q.y}</title></circle>`).join('');
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento del punteggio nel tempo">${grid}
     <path class="area" d="${area}"/><path class="line" d="${line}"/>${dots}
@@ -361,6 +363,7 @@ function heatmap() {
 }
 function vProgress() {
   const st = stats(), { ex, range } = S.pf;
+  if (!S.sessions.length) return `<h1>Progressi</h1><p class="empty">Nessun dato per ora.<br>Dopo il primo allenamento vedrai qui il tuo andamento.<br><br><a class="btn pri" href="#/home" style="text-decoration:none;display:inline-block">Vai agli allenamenti</a></p>`;
   const cutoff = range ? addDays(new Date(), -range) : new Date(0);
   const list = S.sessions.filter(s => (ex === 'all' || s.exercise_id === ex) && parseDay(s.day) >= cutoff);
   const byDay = {};
@@ -368,28 +371,19 @@ function vProgress() {
   const pts = Object.keys(byDay).sort().map(k => ({ x: parseDay(k), y: Math.round(byDay[k].reduce((a, b) => a + b, 0) / byDay[k].length) }));
   const used = [...new Map(S.sessions.map(s => [s.exercise_id, s.exercise_name])).entries()];
   const recent = [...S.sessions].reverse().slice(0, 8);
-  if (!S.sessions.length) return `<h1>Progressi</h1><div class="empty card">Nessun dato ancora.<br>Completa il primo allenamento per vedere qui il tuo andamento.<br><br><a class="btn pri" href="#/home" style="text-decoration:none;display:inline-block">Vai agli allenamenti</a></div>`;
   return `<h1>Progressi</h1>
-  <div class="grid3" style="margin-bottom:14px">
-    <div class="stat"><b>${st.avg}</b><span>score medio</span></div>
-    <div class="stat"><b>${st.max}</b><span>record score</span></div>
-    <div class="stat"><b>${st.mins}</b><span>minuti totali</span></div>
-    <div class="stat"><b>${st.total}</b><span>allenamenti</span></div>
-    <div class="stat"><b>${st.streak}</b><span>streak attuale</span></div>
-    <div class="stat"><b>${st.best}</b><span>streak record</span></div>
-  </div>
-  <div class="card">
-    <div class="row wrap" style="margin-bottom:8px">
-      <select data-change="pfEx" style="flex:2;min-width:140px"><option value="all">Tutti gli esercizi</option>
+  <section class="figs"><div><b>${st.avg}</b><span>score medio</span></div><div><b>${st.max}</b><span>record</span></div><div><b>${st.mins}</b><span>minuti</span></div></section>
+  <section class="figs" style="border:0;padding-top:0;margin-top:20px"><div><b>${st.total}</b><span>allenamenti</span></div><div><b>${st.streak}</b><span>streak attuale</span></div><div><b>${st.best}</b><span>streak record</span></div></section>
+  <section><div class="row between"><h2>Score nel tempo</h2>${infoBtn('Come si calcola')}</div>
+    <div class="filters" style="margin-top:12px">
+      <select data-change="pfEx" aria-label="Esercizio"><option value="all">Tutti gli esercizi</option>
         ${used.map(([id, n]) => `<option value="${esc(id)}" ${id === ex ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
-      <select data-change="pfRange" style="flex:1;min-width:110px">
-        ${[[30, 'Ultimi 30 gg'], [90, 'Ultimi 90 gg'], [0, 'Sempre']].map(([v, l]) => `<option value="${v}" ${v === range ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    </div>
-    <h3>Score nel tempo</h3>${chartSvg(pts)}
-  </div>
-  <div class="card"><h3>Costanza (ultime 16 settimane)</h3>${heatmap()}</div>
-  <div class="card"><h3>Ultimi allenamenti</h3>${recent.map(s => `<div class="list-i"><div><b>${esc(s.exercise_name)}</b>
-    <div class="sm mut">${fmtDate(parseDay(s.day))} · ${s.completed_reps}/${s.total_reps} rip · controllo ${s.quality}/5</div></div><div class="score">${s.score}</div></div>`).join('')}</div>`;
+      <select data-change="pfRange" aria-label="Periodo">
+        ${[[30, 'Ultimi 30 giorni'], [90, 'Ultimi 90 giorni'], [0, 'Sempre']].map(([v, l]) => `<option value="${v}" ${v === range ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    </div>${chartSvg(pts)}</section>
+  <section><h2>Costanza</h2><p class="sm mut" style="margin-bottom:10px">Le ultime 16 settimane</p>${heatmap()}</section>
+  <section><h2>Ultimi allenamenti</h2>${recent.map(s => `<div class="list-i"><div><b>${esc(s.exercise_name)}</b>
+    <div class="sm mut">${fmtDate(parseDay(s.day))} · ${s.completed_reps}/${s.total_reps} ripetizioni · controllo ${s.quality}/5</div></div><div class="score">${s.score}</div></div>`).join('')}</section>`;
 }
 
 function vTrophies() {
@@ -400,42 +394,41 @@ function vTrophies() {
   const rows = [...T].sort((a, b) => (!!S.trophies[b.id] - !!S.trophies[a.id]) || order[a.tier] - order[b.tier]).map(t => {
     const own = S.trophies[t.id];
     const pr = !own && t.prog ? t.prog(c) : null;
-    return `<div class="tr ${own ? '' : 'lock'}">${cup(t.tier, !own)}<div class="grow"><div class="nm">${esc(t.name)} <span class="tag">${TIER_LABEL[t.tier]}</span></div>
+    return `<div class="tr ${own ? '' : 'lock'}"><span class="medal ${own ? t.tier : ''}">${cup(t.tier, !own)}</span><div class="grow"><div class="nm">${esc(t.name)} <span class="tag">${TIER_LABEL[t.tier]}</span></div>
       <div class="ds">${esc(t.desc)}</div>
       ${pr ? `<div class="bar"><i style="width:${Math.min(100, pr[0] / pr[1] * 100)}%"></i></div>` : ''}
       ${own ? `<div class="ds">Sbloccato il ${new Date(own).toLocaleDateString('it-IT')}</div>` : ''}</div></div>`;
   }).join('');
   return `<h1>Trofei</h1>
-  <div class="card hero"><div class="row between"><div><div class="streak-big">${pct}%</div><div class="mut sm">${got} di ${T.length} sbloccati</div></div>
-    ${cup(S.trophies.platinum ? 'platinum' : 'gold', !got)}</div>
-    <div class="bar" style="margin-top:10px"><i style="width:${pct}%"></i></div>
-    <div class="tier-sum">${['platinum', 'gold', 'silver', 'bronze'].map(t => `<span>${cup(t)}${cnt(t)}</span>`).join('')}</div></div>
-  <div class="card">${rows}</div>`;
+  <section class="streak" style="margin-top:20px"><div class="streak-num"><b class="big-pct" style="font-size:4.5rem;font-weight:300">${pct}%</b><span>${got} di ${T.length} sbloccati</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="tier-sum">${['platinum', 'gold', 'silver', 'bronze'].map(t => `<span>${cup(t)}${cnt(t)}</span>`).join('')}</div></section>
+  <section style="margin-top:20px">${rows}</section>`;
 }
 
 function vProfile() {
-  const settings = `<div class="card"><h3>Impostazioni</h3>
-    <label class="row between" style="margin:8px 0"><span style="color:var(--tx);font-size:1rem">Suoni guida</span><input type="checkbox" data-change="sound" ${S.settings.sound ? 'checked' : ''} style="width:auto"></label>
-    <label class="row between" style="margin:8px 0"><span style="color:var(--tx);font-size:1rem">Vibrazione</span><input type="checkbox" data-change="vibrate" ${S.settings.vibrate ? 'checked' : ''} style="width:auto"></label></div>`;
+  const settings = `<div class="block"><h2>Impostazioni</h2>
+    <label class="toggle"><span>Suoni guida</span><input type="checkbox" data-change="sound" ${S.settings.sound ? 'checked' : ''}></label>
+    <label class="toggle"><span>Vibrazione</span><input type="checkbox" data-change="vibrate" ${S.settings.vibrate ? 'checked' : ''}></label></div>`;
   let acct;
   if (!sb) {
-    acct = `<div class="card"><h3>Modalità locale</h3><p class="sm mut">Supabase non è configurato: i dati restano su questo dispositivo. Inserisci URL e anon key in <code>config.js</code> per attivare account e salvataggio cloud.</p></div>`;
+    acct = `<div class="block"><h2>Modalità locale</h2><p class="sm mut" style="margin-top:6px">Supabase non è configurato: i dati restano su questo dispositivo. Inserisci URL e chiave in <code>config.js</code> per attivare gli account.</p></div>`;
   } else if (S.user) {
-    acct = `<div class="card"><h3>Account</h3><p class="sm">Connesso come <b>${esc(S.user.email)}</b></p>
-      <p class="sm mut">I tuoi dati sono salvati nel cloud e sincronizzati tra i dispositivi.</p>
-      <button class="btn danger" data-act="signout">Esci</button></div>`;
+    acct = `<div class="block"><h2>Account</h2><p style="margin-top:6px">Connesso come <b>${esc(S.user.email)}</b></p>
+      <p class="sm mut">I dati sono salvati nel cloud e sincronizzati tra i dispositivi.</p>
+      <button class="btn ghost danger" style="margin-top:14px" data-act="signout">Esci</button></div>`;
   } else {
-    acct = `<div class="card"><h3>Accedi o crea un account</h3>
-      <p class="sm mut">Con l'account salvi esercizi, punteggi e trofei nel cloud.</p>
+    acct = `<div class="block"><h2>Accedi o registrati</h2>
+      <p class="sm mut" style="margin-top:6px">Con un account salvi esercizi, punteggi e trofei nel cloud.</p>
       <label for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email">
-      <label for="pw">Password (min. 6 caratteri)</label><input id="pw" type="password" autocomplete="current-password">
-      <div class="row" style="margin-top:14px"><button class="btn pri grow" data-act="signin">Accedi</button><button class="btn grow" data-act="signup">Registrati</button></div></div>`;
+      <label for="pw">Password (almeno 6 caratteri)</label><input id="pw" type="password" autocomplete="current-password">
+      <div class="row" style="margin-top:18px"><button class="btn pri grow" data-act="signin">Accedi</button><button class="btn ghost grow" data-act="signup">Registrati</button></div></div>`;
   }
-  const data = `<div class="card"><h3>I tuoi dati</h3><div class="row wrap">
-    <button class="btn sm" data-act="export">Esporta JSON</button>
-    ${!cloud() ? '<button class="btn sm danger" data-act="resetLocal">Cancella dati locali</button>' : ''}</div></div>`;
+  const data = `<div class="block"><h2>I tuoi dati</h2><div class="row wrap" style="margin-top:12px">
+    <button class="btn ghost sm" data-act="export">Esporta in JSON</button>
+    ${!cloud() ? '<button class="btn ghost danger sm" data-act="resetLocal">Cancella dati locali</button>' : ''}</div></div>`;
   return `<h1>Profilo</h1>${acct}${settings}${data}
-    <p class="sm mut center">Kegel Coach · gli esercizi non sostituiscono il parere medico.</p>`;
+    <p class="fine">Gli esercizi non sostituiscono il parere medico.</p>`;
 }
 
 /* ───────── modal esercizio personalizzato ───────── */
@@ -455,6 +448,27 @@ function openCustom(id) {
 }
 const closeModal = () => { $('#modal').innerHTML = ''; };
 
+const infoBtn = (label = 'Come si calcola lo score') => `<button class="info-btn" data-act="scoreInfo">${icon('info', 18)}<span>${label}</span></button>`;
+function openScoreInfo() {
+  $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Come si calcola lo score">
+    <h2>Come si calcola lo score</h2>
+    <p class="mut" style="margin-top:6px">Ogni esercizio vale da 0 a 100 punti, in due parti.</p>
+    <div class="legend">
+      <div class="leg-row"><span class="leg-pts">70</span><div><b>Ripetizioni</b>
+        <p class="sm mut">Ogni ripetizione portata a termine vale lo stesso numero di punti. Se tocchi "Non ci riesco", quella ripetizione non conta.</p>
+        <p class="sm">Esempio: 8 ripetizioni su 10 = 56 punti.</p></div></div>
+      <div class="leg-row"><span class="leg-pts">30</span><div><b>Controllo</b>
+        <p class="sm mut">A fine esercizio dai da 1 a 5 stelle a quanto controllo hai sentito. Ogni stella vale 6 punti.</p>
+        <p class="sm">Esempio: 4 stelle = 24 punti.</p></div></div>
+    </div>
+    <p class="sm"><b>Totale dell'esempio:</b> 56 + 24 = 80 punti.</p>
+    <div class="legend bands">
+      <div><b>90–100</b><span>Ottimo</span></div><div><b>75–89</b><span>Buono</span></div>
+      <div><b>50–74</b><span>In crescita</span></div><div><b>0–49</b><span>Da consolidare</span></div></div>
+    <p class="sm mut">Le stelle le assegni tu: sii onesto, il grafico serve a vedere i tuoi miglioramenti reali. Nei Progressi, lo score di un giorno è la media degli esercizi di quel giorno.</p>
+    <button class="btn pri big" data-act="closeModal" style="margin-top:20px">Ho capito</button></div></div>`;
+}
+
 /* ───────── runner (allenamento guidato) ───────── */
 let R = null, wake = null;
 const RING = 578.05;
@@ -472,16 +486,16 @@ function loadExercise() {
   const ex = R.queue[R.qi];
   Object.assign(R, { ex, steps: buildSteps(ex), i: 0, paused: false, done: 0, missed: false, elapsed: 0, totalReps: ex.reps * ex.sets });
   R.left = R.steps[0].d;
-  $('#runner').innerHTML = `<div class="run" role="dialog" aria-label="Allenamento">
-    <div class="run-top"><button class="btn sm" data-act="runQuit" aria-label="Esci">✕</button>
-      <div class="t">Esercizio ${R.qi + 1}/${R.queue.length}<br><b style="color:var(--tx)">${esc(ex.name)}</b></div>
-      <button class="btn sm" id="r-pause" data-act="runPause">⏸</button></div>
+  $('#runner').innerHTML = `<div class="run" id="r-run" data-phase="prep" role="dialog" aria-label="Allenamento">
+    <div class="run-top"><button class="round" data-act="runQuit" aria-label="Esci dall'allenamento">${icon('close')}</button>
+      <div class="t">Esercizio ${R.qi + 1} di ${R.queue.length}<b>${esc(ex.name)}</b></div>
+      <button class="round" id="r-pause" data-act="runPause" aria-label="Pausa">${icon('pause')}</button></div>
     <div class="orb-wrap"><svg viewBox="0 0 200 200"><circle class="ring-bg" cx="100" cy="100" r="92"/><circle class="ring" id="r-ring" cx="100" cy="100" r="92"/></svg>
       <div class="orb prep" id="r-orb"></div>
       <div class="orb-txt"><div class="cue" id="r-cue"></div><div class="cnt" id="r-cnt"></div></div></div>
     <div class="run-info" id="r-info"></div>
     <div class="run-hint" id="r-hint"></div>
-    <div class="run-act"><button class="btn" id="r-miss" data-act="runMiss">Non ci riesco</button></div></div>`;
+    <div class="run-act"><button class="btn ghost" id="r-miss" data-act="runMiss">Non ci riesco</button></div></div>`;
   enterStep(true);
   clearInterval(R.timer);
   R.timer = setInterval(tick, 100);
@@ -495,17 +509,17 @@ const HINT = {
 function enterStep(first) {
   const st = R.steps[R.i], orb = $('#r-orb');
   if (!orb) return;
-  orb.style.transitionDuration = Math.min(st.d * .6, 1.2) + 's';
+  $('#r-run').dataset.phase = st.t;
+  orb.style.transitionDuration = Math.min(st.d * .7, 1.6) + 's';
   orb.className = 'orb ' + (st.t === 'contract' ? 'on' : st.t === 'prep' ? 'prep' : '');
   $('#r-cue').textContent = { prep: 'Preparati', contract: 'Contrai', rest: 'Rilascia', setrest: 'Pausa' }[st.t];
   $('#r-hint').textContent = HINT[st.t];
-  $('#r-info').textContent = st.t === 'prep' ? `${R.ex.reps} rip × ${R.ex.sets} serie`
-    : `Serie ${st.s}/${R.ex.sets} · Ripetizione ${st.r}/${R.ex.reps}`;
+  $('#r-info').textContent = st.t === 'prep' ? `${R.ex.reps} ripetizioni × ${R.ex.sets} serie`
+    : `Serie ${st.s} di ${R.ex.sets} · Ripetizione ${st.r} di ${R.ex.reps}`;
   const miss = $('#r-miss');
   miss.style.visibility = st.t === 'contract' ? 'visible' : 'hidden';
   miss.textContent = 'Non ci riesco';
   miss.disabled = false;
-  $('#r-ring').style.stroke = st.t === 'contract' ? 'var(--acc)' : 'var(--mut)';
   if (!first) { beep(st.t === 'contract' ? 740 : 520, .1); vibrate(st.t === 'contract' ? 60 : 25); }
   updateRing();
 }
@@ -532,13 +546,14 @@ function nextStep() {
 function finishExercise() {
   clearInterval(R.timer); R.timer = null; dropWake();
   beep(988, .15); vibrate([80, 40, 80]);
-  $('#runner').innerHTML = `<div class="run"><div style="margin:auto;width:100%;max-width:420px" class="center">
+  $('#runner').innerHTML = `<div class="run"><div class="sheet" style="margin:auto">
     <h1>${esc(R.ex.name)}</h1>
-    <p class="mut">Ripetizioni completate: <b style="color:var(--tx)">${R.done}/${R.totalReps}</b></p>
-    <h2 style="margin-top:18px">Quanto controllo hai sentito?</h2>
-    <div class="stars" role="radiogroup" aria-label="Valutazione controllo">${[1, 2, 3, 4, 5].map(n => `<button data-act="rate" data-id="${n}" aria-label="${n} su 5">★</button>`).join('')}</div>
-    <p class="sm mut" id="r-qlbl">1 = faticoso e instabile · 5 = controllo ottimo</p>
-    <button class="btn pri big" id="r-save" data-act="saveRun" disabled style="margin-top:14px">Salva risultato</button></div></div>`;
+    <p class="mut" style="margin-top:6px">Ripetizioni completate: <b style="color:var(--ink)">${R.done} su ${R.totalReps}</b></p>
+    <h2 style="margin-top:36px">Quanto controllo hai sentito?</h2>
+    <div class="stars" role="group" aria-label="Valutazione del controllo">${[1, 2, 3, 4, 5].map(n => `<button data-act="rate" data-id="${n}" aria-label="${n} su 5">${icon('star', 40, true)}</button>`).join('')}</div>
+    <p class="sm mut" id="r-qlbl">Da 1 (faticoso e instabile) a 5 (controllo ottimo)</p>
+    ${infoBtn()}
+    <button class="btn pri big" id="r-save" data-act="saveRun" disabled style="margin-top:28px">Salva risultato</button></div></div>`;
   R.quality = 0;
 }
 const QL = ['', 'Faticoso e instabile', 'Un po\' difficile', 'Discreto', 'Buon controllo', 'Controllo ottimo'];
@@ -552,14 +567,15 @@ async function saveRun() {
   const last = R.qi === R.queue.length - 1;
   await checkTrophies(last && R.program ? 'program' : null);
   const st = stats();
-  $('#runner').innerHTML = `<div class="run"><div style="margin:auto;width:100%;max-width:420px" class="center">
+  $('#runner').innerHTML = `<div class="run"><div class="sheet" style="margin:auto">
     <p class="mut">${esc(R.ex.name)}</p><div class="bigscore">${score}</div><p class="mut">punti su 100</p>
-    <div class="card" style="margin-top:16px;text-align:left">
-      <div class="list-i"><span>Ripetizioni (${R.done}/${total})</span><b>${Math.round(R.done / total * 70)}/70</b></div>
-      <div class="list-i"><span>Controllo (${R.quality}/5)</span><b>${Math.round(R.quality / 5 * 30)}/30</b></div>
-      <div class="list-i"><span>Streak</span><b>🔥 ${st.streak}</b></div></div>
+    ${infoBtn()}
+    <div style="margin:28px 0">
+      <div class="list-i"><span>Ripetizioni (${R.done} su ${total})</span><b>${Math.round(R.done / total * 70)} / 70</b></div>
+      <div class="list-i"><span>Controllo (${R.quality} su 5)</span><b>${Math.round(R.quality / 5 * 30)} / 30</b></div>
+      <div class="list-i"><span>Streak</span><b>${st.streak} ${st.streak === 1 ? 'giorno' : 'giorni'}</b></div></div>
     ${last ? `<button class="btn pri big" data-act="runDone">Fine</button>`
-      : `<button class="btn pri big" data-act="runNext">Prossimo: ${esc(R.queue[R.qi + 1].name)} →</button>`}</div></div>`;
+      : `<button class="btn pri big" data-act="runNext">Prossimo: ${esc(R.queue[R.qi + 1].name)}</button>`}</div></div>`;
 }
 function endRun() { if (R?.timer) clearInterval(R.timer); R = null; dropWake(); $('#runner').innerHTML = ''; render(); }
 
@@ -606,6 +622,7 @@ const ACTS = {
   newCustom: () => openCustom(),
   editCustom: el => openCustom(el.dataset.id),
   closeModal,
+  scoreInfo: openScoreInfo,
   delCustom: async el => {
     if (!confirm('Eliminare questo esercizio? Lo storico dei punteggi resta.')) return;
     try { await deleteCustom(el.dataset.id); render(); } catch (e) { toast(e.message, 'err'); }
@@ -619,8 +636,8 @@ const ACTS = {
     try { await saveCustom(e); closeModal(); S.exTab = 'mine'; render(); await checkTrophies(); }
     catch (err) { toast('Salvataggio non riuscito: ' + err.message, 'err'); }
   },
-  runPause: el => { if (!R) return; R.paused = !R.paused; el.textContent = R.paused ? '▶' : '⏸'; $('#r-hint').textContent = R.paused ? 'In pausa' : HINT[R.steps[R.i].t]; },
-  runMiss: el => { if (!R) return; R.missed = true; el.textContent = 'Rep segnata come mancata'; el.disabled = true; },
+  runPause: el => { if (!R) return; R.paused = !R.paused; el.innerHTML = icon(R.paused ? 'play' : 'pause', 22, R.paused); el.setAttribute('aria-label', R.paused ? 'Riprendi' : 'Pausa'); $('#r-hint').textContent = R.paused ? 'In pausa' : HINT[R.steps[R.i].t]; },
+  runMiss: el => { if (!R) return; R.missed = true; el.textContent = 'Ripetizione segnata come mancata'; el.disabled = true; },
   runQuit: () => { if (confirm('Interrompere l\'allenamento? I risultati di questo esercizio non verranno salvati.')) endRun(); },
   rate: el => {
     const n = Number(el.dataset.id); R.quality = n;
