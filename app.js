@@ -20,7 +20,7 @@ const sb = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)
 /* ───────── stato ───────── */
 const S = {
   user: null, sessions: [], customs: [], trophies: {},
-  exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
+  endImgs: [], endImgsAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
   settings: { sound: true, vibrate: true },
 };
 const LS = 'kegel-coach:v1', LSS = 'kegel-coach:settings';
@@ -655,6 +655,7 @@ function nextStep() {
   enterStep(false);
 }
 function finishExercise() {
+  refreshEndImages();
   clearInterval(R.timer); R.timer = null; dropWake();
   beep(988, .15); vibrate([80, 40, 80]);
   $('#runner').innerHTML = `<div class="run"><div class="sheet" style="margin:auto">
@@ -689,8 +690,26 @@ async function saveRun() {
     ${last ? `<button class="btn pri big" data-act="runDone">Fine</button>`
       : `<button class="btn pri big" data-act="runNext">Prossimo: ${esc(R.queue[R.qi + 1].name)}</button>`}</div></div>`;
 }
-function endImage() { // immagine a rotazione a fine esercizio (elenco in config.js → END_IMAGES)
-  const list = (cfg.END_IMAGES || []).filter(Boolean);
+/* Immagini private: bucket Supabase "end-images", una cartella per utente (nome = ID utente). Le vede solo il proprietario. */
+const IMG_RE = /\.(jpe?g|png|webp|avif)$/i;
+async function loadEndImages() {
+  if (!cloud()) { S.endImgs = []; return; }
+  try {
+    const bucket = sb.storage.from('end-images');
+    const { data: files, error } = await bucket.list(S.user.id, { limit: 50 });
+    if (error || !files) { S.endImgs = []; return; }
+    const paths = files.filter(f => IMG_RE.test(f.name)).map(f => `${S.user.id}/${f.name}`);
+    if (!paths.length) { S.endImgs = []; S.endImgsAt = Date.now(); return; }
+    const { data: signed } = await bucket.createSignedUrls(paths, 21600); // validi 6 ore
+    S.endImgs = (signed || []).map(x => x.signedUrl).filter(Boolean);
+    S.endImgsAt = Date.now();
+    S.endImgs.forEach(u => { const im = new Image(); im.src = u; }); // precarica
+  } catch { S.endImgs = []; }
+}
+const refreshEndImages = () => { if (cloud() && Date.now() - (S.endImgsAt || 0) > 5 * 3600e3) loadEndImages(); };
+
+function endImage() { // immagine a rotazione a fine esercizio
+  const list = [...(S.endImgs || []), ...(cfg.END_IMAGES || [])].filter(Boolean);
   if (!list.length) return '';
   let last = -1; try { last = Number(sessionStorage.getItem('kegel:lastImg')); } catch { /* ignore */ }
   let i = Math.floor(Math.random() * list.length);
@@ -882,6 +901,7 @@ if (sb) {
     setTimeout(async () => { // fuori dal callback, come raccomanda Supabase
       await loadData();
       if (u) await maybeImportLocal();
+      if (u) loadEndImages(); else S.endImgs = [];
       S.ready = true;
       if (u) await checkTrophies();
       if (u && wasOut) location.hash = '#/home';
