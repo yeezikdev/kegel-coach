@@ -56,8 +56,18 @@ const allEx = () => [...DEFAULTS, ...S.customs];
 const getEx = id => allEx().find(e => e.id === id);
 
 const isCircuit = e => !!e?.circuit?.items;
-const circuitComps = e => e.circuit.items.map(getEx).filter(c => c && !isCircuit(c));
-const circuitNames = e => isCircuit(e) ? circuitComps(e).map(c => c.name).join(' → ') : '';
+/* Un circuito è una lista di "blocchi": ognuno è un esercizio completo con i propri valori (copiati o personalizzati). */
+const LIM = { contract: [1, 120], rest: [1, 120], reps: [1, 100], sets: [1, 10], setRest: [0, 120], rounds: [1, 10], cRest: [0, 120] };
+const STEP = { contract: 1, rest: 1, reps: 1, sets: 1, setRest: 5, rounds: 1, cRest: 5 };
+const cl = (k, v) => clamp(v, LIM[k][0], LIM[k][1]);
+const blockFrom = e => e && ({
+  name: (String(e.name || '').trim() || 'Esercizio').slice(0, 40),
+  contract: cl('contract', e.contract), rest: cl('rest', e.rest), reps: cl('reps', e.reps), sets: cl('sets', e.sets), setRest: cl('setRest', e.setRest ?? 30),
+});
+const blocksOf = e => e.circuit.items.map(it => typeof it === 'string' ? blockFrom(getEx(it)) : blockFrom(it)).filter(Boolean); // gli id sono il vecchio formato
+const circuitComps = blocksOf;
+const circuitNames = e => isCircuit(e) ? blocksOf(e).map(c => c.name).join(' → ') : '';
+const fmtDur = secs => { secs = Math.round(secs); const m = Math.floor(secs / 60), r = secs % 60; return m ? (r ? `${m} min ${r} s` : `${m} min`) : `${r} s`; };
 
 function buildSteps(ex) {
   if (isCircuit(ex)) { // circuito: esercizi in sequenza, ripetuti per il numero di giri
@@ -85,8 +95,8 @@ function buildSteps(ex) {
 const secsOf = ex => buildSteps(ex).reduce((a, s) => a + s.d, 0);
 const minsLabel = secs => secs < 90 ? `${Math.round(secs)} sec` : `~${Math.round(secs / 60)} min`;
 const exMeta = e => isCircuit(e)
-  ? `Circuito · ${e.circuit.items.length} esercizi × ${e.circuit.rounds} ${e.circuit.rounds === 1 ? 'giro' : 'giri'} · ${minsLabel(secsOf(e))}`
-  : `${e.contract}s contrazione · ${e.rest}s riposo · ${e.reps} rip × ${e.sets} serie · ${minsLabel(secsOf(e))}`;
+  ? `Circuito · ${e.circuit.items.length} esercizi × ${e.circuit.rounds} ${e.circuit.rounds === 1 ? 'giro' : 'giri'} · ${fmtDur(secsOf(e))}`
+  : `${e.contract}s contrazione · ${e.rest}s riposo · ${e.reps} rip × ${e.sets} serie · ${fmtDur(secsOf(e))}`;
 
 /* ───────── data layer (cloud o locale) ───────── */
 const exFromRow = r => ({ id: r.id, name: r.name, description: r.description || '', contract: r.contract_sec, rest: r.rest_sec, reps: r.reps, sets: r.sets, setRest: r.set_rest_sec, custom: true, ...(r.circuit ? { circuit: r.circuit } : {}) });
@@ -507,55 +517,89 @@ function vProfile() {
 }
 
 /* ───────── modal esercizio personalizzato ───────── */
-let DR = null; // bozza dell'esercizio nel modal
+let DR = null; // bozza nel modal
+const BLOCK_KEYS = ['contract', 'rest', 'reps', 'sets', 'setRest'];
 function newDraft(id) {
   const e = id ? S.customs.find(x => x.id === id) : null;
-  const base = { id: '', type: 'single', name: '', description: '', contract: 5, rest: 5, reps: 10, sets: 1, setRest: 30, items: [], rounds: 2, cRest: 10 };
+  const base = { id: '', type: 'single', name: '', description: '', contract: 5, rest: 5, reps: 10, sets: 1, setRest: 30, items: [], rounds: 1, cRest: 10 };
   if (!e) return base;
   return isCircuit(e)
-    ? { ...base, id: e.id, type: 'circuit', name: e.name, description: e.description || '', items: [...e.circuit.items], rounds: e.circuit.rounds, cRest: e.circuit.rest }
+    ? { ...base, id: e.id, type: 'circuit', name: e.name, description: e.description || '', items: blocksOf(e), rounds: e.circuit.rounds, cRest: e.circuit.rest }
     : { ...base, id: e.id, name: e.name, description: e.description || '', contract: e.contract, rest: e.rest, reps: e.reps, sets: e.sets, setRest: e.setRest };
 }
+const numVal = (id, fb) => { const el = $('#' + id); return !el || el.value === '' ? fb : Number(el.value); };
 function syncDraft() { // copia nella bozza ciò che è scritto nei campi
   if (!DR || !$('#f-name')) return;
   DR.name = $('#f-name').value; DR.description = $('#f-desc').value;
-  const val = (k, fallback) => { const v = $('#f-' + k).value; return v === '' ? fallback : Number(v); };
-  if (DR.type === 'single') for (const k of ['contract', 'rest', 'reps', 'sets', 'setRest']) DR[k] = val(k, DR[k]);
-  else { DR.rounds = val('rounds', DR.rounds); DR.cRest = val('cRest', DR.cRest); }
+  if (DR.type === 'single') for (const k of BLOCK_KEYS) DR[k] = numVal('f-' + k, DR[k]);
+  else {
+    DR.rounds = numVal('f-rounds', DR.rounds); DR.cRest = numVal('f-cRest', DR.cRest);
+    DR.items.forEach((b, i) => { const n = $(`#b${i}-name`); if (n) b.name = n.value; for (const k of BLOCK_KEYS) b[k] = numVal(`b${i}-${k}`, b[k]); });
+  }
 }
-function renderCustom() {
-  const d = DR, isNew = !d.id;
-  const num = (k, l, min, max) => `<div><label for="f-${k}">${l}</label><input id="f-${k}" type="number" min="${min}" max="${max}" value="${d[k]}" inputmode="numeric"></div>`;
+const draftEx = d => d.type === 'circuit'
+  ? { name: d.name, circuit: { items: d.items.map(blockFrom), rounds: cl('rounds', d.rounds), rest: cl('cRest', d.cRest) } }
+  : blockFrom(d);
+const blockSecs = b => buildSteps(blockFrom(b)).slice(1).reduce((a, x) => a + x.d, 0);
+function totalsText(d) {
+  if (d.type === 'circuit' && !d.items.length) return { tot: '–', sub: 'Aggiungi gli esercizi' };
+  const ex = draftEx(d), secs = secsOf(ex);
+  return d.type === 'circuit'
+    ? { tot: fmtDur(secs), sub: `${d.items.length} esercizi × ${ex.circuit.rounds} ${ex.circuit.rounds === 1 ? 'giro' : 'giri'} · incl. 3 s di preparazione` }
+    : { tot: fmtDur(secs), sub: `${ex.reps * ex.sets} ripetizioni · incl. 3 s di preparazione` };
+}
+function updateTotals() { // aggiorna le durate senza ridisegnare (così la tastiera resta aperta)
+  if (!DR || !$('#f-name')) return;
+  syncDraft();
+  const t = totalsText(DR);
+  $('#m-tot').textContent = t.tot; $('#m-sub').textContent = t.sub;
+  DR.items.forEach((b, i) => { const el = $(`[data-blk-time="${i}"]`); if (el) el.textContent = fmtDur(blockSecs(b)); });
+}
+const FLD_LABEL = { contract: 'Contrazione (sec)', rest: 'Riposo (sec)', reps: 'Ripetizioni', sets: 'Serie', setRest: 'Pausa tra le serie (sec)', rounds: 'Giri del circuito', cRest: 'Pausa tra esercizi (sec)' };
+const stepper = (id, k, value) => `<div class="fld"><label for="${id}">${FLD_LABEL[k]}</label><div class="stepper">
+  <button type="button" data-act="step" data-t="${id}" data-d="-1" aria-label="Diminuisci">−</button>
+  <input id="${id}" data-k="${k}" type="number" inputmode="numeric" min="${LIM[k][0]}" max="${LIM[k][1]}" value="${value}">
+  <button type="button" data-act="step" data-t="${id}" data-d="1" aria-label="Aumenta">+</button></div></div>`;
+function renderCustom(focusLast) {
+  const d = DR, isNew = !d.id, keep = $('.m-body')?.scrollTop || 0;
   const pool = allEx().filter(e => !isCircuit(e) && e.id !== d.id);
   let body;
   if (d.type === 'single') {
-    body = `<div class="grid2">${num('contract', 'Contrazione (sec)', 1, 30)}${num('rest', 'Riposo (sec)', 1, 30)}
-      ${num('reps', 'Ripetizioni', 1, 50)}${num('sets', 'Serie', 1, 10)}</div>${num('setRest', 'Pausa tra le serie (sec)', 0, 120)}`;
+    body = `<div class="grid2">${stepper('f-contract', 'contract', d.contract)}${stepper('f-rest', 'rest', d.rest)}${stepper('f-reps', 'reps', d.reps)}${stepper('f-sets', 'sets', d.sets)}</div>
+      <details class="more"><summary>Altre opzioni</summary>${stepper('f-setRest', 'setRest', d.setRest)}</details>`;
   } else {
-    const secs = d.items.length ? secsOf({ name: d.name, circuit: { items: d.items, rounds: clamp(d.rounds, 1, 10), rest: clamp(d.cRest, 0, 60) } }) : 0;
-    body = `<h3 style="margin-top:22px">Esercizi del circuito</h3>
-    ${d.items.length ? d.items.map((id, i) => `<div class="cir-item"><span class="cir-n">${i + 1}</span><span class="grow">${esc(getEx(id)?.name || 'Esercizio eliminato')}</span>
-      <button type="button" class="link" data-act="draftUp" data-id="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Sposta su">Su</button>
-      <button type="button" class="link" data-act="draftDown" data-id="${i}" ${i === d.items.length - 1 ? 'disabled' : ''} aria-label="Sposta giù">Giù</button>
-      <button type="button" class="link danger" data-act="draftDel" data-id="${i}">Togli</button></div>`).join('')
-      : '<p class="sm mut" style="margin-top:8px">Aggiungi almeno due esercizi: puoi ripetere lo stesso più volte.</p>'}
-    <div class="row" style="margin-top:14px"><select id="f-pick" style="flex:1" aria-label="Esercizio da aggiungere">${pool.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
-      <button type="button" class="btn sm" data-act="draftAdd">Aggiungi</button></div>
-    <div class="grid2">${num('rounds', 'Giri', 1, 10)}${num('cRest', 'Pausa tra esercizi (sec)', 0, 60)}</div>
-    ${secs ? `<p class="sm mut" style="margin-top:12px">Durata stimata: ${minsLabel(secs)}</p>` : ''}`;
+    body = `<h3 style="margin-top:26px">Esercizi del circuito</h3>
+    <p class="sm mut">Ogni esercizio ha i suoi valori: parti da uno pronto o crealo da zero, poi cambia tutto come vuoi.</p>
+    ${d.items.map((b, i) => `<div class="blk">
+      <div class="blk-head"><span class="cir-n">${i + 1}</span><input id="b${i}-name" class="blk-name" maxlength="40" value="${esc(b.name)}" aria-label="Nome dell'esercizio ${i + 1}"><span class="blk-time" data-blk-time="${i}">${fmtDur(blockSecs(b))}</span></div>
+      <div class="grid2">${stepper(`b${i}-contract`, 'contract', b.contract)}${stepper(`b${i}-rest`, 'rest', b.rest)}${stepper(`b${i}-reps`, 'reps', b.reps)}${stepper(`b${i}-sets`, 'sets', b.sets)}</div>
+      <details class="more"><summary>Altre opzioni</summary>${stepper(`b${i}-setRest`, 'setRest', b.setRest)}</details>
+      <div class="blk-act"><button type="button" class="link" data-act="draftUp" data-id="${i}" ${i === 0 ? 'disabled' : ''}>Su</button><button type="button" class="link" data-act="draftDown" data-id="${i}" ${i === d.items.length - 1 ? 'disabled' : ''}>Giù</button>
+        <button type="button" class="link" data-act="draftDup" data-id="${i}">Duplica</button><button type="button" class="link danger" data-act="draftDel" data-id="${i}">Togli</button></div></div>`).join('')}
+    <p class="sm" style="margin:18px 0 8px"><b>Aggiungi un esercizio</b></p>
+    <div class="chips"><button type="button" class="chip-add main" data-act="draftAdd" data-id="custom">+ Personalizzato</button>
+      ${pool.map(e => `<button type="button" class="chip-add" data-act="draftAdd" data-id="${esc(e.id)}">+ ${esc(e.name)}</button>`).join('')}</div>
+    <h3 style="margin-top:26px">Come si ripete</h3>
+    <div class="grid2">${stepper('f-rounds', 'rounds', d.rounds)}${stepper('f-cRest', 'cRest', d.cRest)}</div>`;
   }
-  $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Esercizio personalizzato">
-    <h2>${isNew ? 'Nuovo allenamento' : 'Modifica'}</h2>
-    ${isNew ? `<nav class="subtabs" aria-label="Tipo"><button class="${d.type === 'single' ? 'on' : ''}" data-act="draftType" data-id="single">Esercizio singolo</button><button class="${d.type === 'circuit' ? 'on' : ''}" data-act="draftType" data-id="circuit">Circuito</button></nav>` : ''}
-    <label for="f-name">Nome</label><input id="f-name" maxlength="60" value="${esc(d.name)}" placeholder="${d.type === 'circuit' ? 'Es. Circuito serale' : 'Es. Tenuta serale'}">
-    <label for="f-desc">Note (facoltative)</label><textarea id="f-desc" rows="2" maxlength="300">${esc(d.description)}</textarea>
-    ${body}
-    <div class="row" style="margin-top:22px"><button class="btn ghost grow" data-act="closeModal">Annulla</button>
-      <button class="btn pri grow" data-act="saveCustom">Salva</button></div></div></div>`;
+  const t = totalsText(d);
+  $('#modal').innerHTML = `<div class="modal-bg"><div class="modal editor" role="dialog" aria-modal="true" aria-label="Allenamento personalizzato">
+    <div class="m-head"><h2>${isNew ? 'Nuovo allenamento' : 'Modifica allenamento'}</h2><button type="button" class="round" data-act="closeModal" aria-label="Chiudi">${icon('close')}</button></div>
+    <div class="m-body">
+      ${isNew ? `<div class="tiles"><button type="button" class="tile ${d.type === 'single' ? 'on' : ''}" data-act="draftType" data-id="single"><b>Esercizio singolo</b><span>Un movimento con le tue ripetizioni e i tuoi tempi</span></button>
+        <button type="button" class="tile ${d.type === 'circuit' ? 'on' : ''}" data-act="draftType" data-id="circuit"><b>Circuito</b><span>Più esercizi di fila, ognuno con i suoi valori</span></button></div>` : ''}
+      <label for="f-name">Nome</label><input id="f-name" maxlength="60" value="${esc(d.name)}" placeholder="${d.type === 'circuit' ? 'Es. Circuito serale' : 'Es. Tenuta serale'}">
+      <label for="f-desc">Note (facoltative)</label><textarea id="f-desc" rows="2" maxlength="300">${esc(d.description)}</textarea>
+      ${body}
+    </div>
+    <div class="m-foot"><div><div class="sm mut">Durata totale</div><b class="tot" id="m-tot">${t.tot}</b><div class="sm mut" id="m-sub">${t.sub}</div></div>
+      <button type="button" class="btn pri" data-act="saveCustom">Salva</button></div></div></div>`;
+  const mb = $('.m-body'); if (mb) mb.scrollTop = keep;
+  if (focusLast) { const last = [...document.querySelectorAll('.blk')].pop(); last?.scrollIntoView({ block: 'center' }); }
 }
 function openCustom(id) {
   DR = newDraft(id); renderCustom();
-  if (matchMedia('(hover:hover)').matches) $('#f-name')?.focus(); // su touch niente focus automatico (coprirebbe il form con la tastiera)
+  if (matchMedia('(hover:hover)').matches) $('#f-name')?.focus();
 }
 const closeModal = () => { $('#modal').innerHTML = ''; DR = null; };
 
@@ -758,7 +802,7 @@ async function maybeImportLocal() {
   try {
     const idMap = {};
     for (const e0 of [...(d.customs || [])].sort((a, b) => isCircuit(a) - isCircuit(b))) { // prima i singoli, poi i circuiti
-      const e = isCircuit(e0) ? { ...e0, circuit: { ...e0.circuit, items: e0.circuit.items.map(i => idMap[i] || i) } } : e0;
+      const e = isCircuit(e0) ? { ...e0, circuit: { ...e0.circuit, items: e0.circuit.items.map(i => typeof i === 'string' ? (idMap[i] || i) : i) } } : e0;
       const { data, error } = await sb.from('custom_exercises').insert(exToRow(e)).select().single();
       if (error) throw error; idMap[e0.id] = data.id;
     }
@@ -801,7 +845,20 @@ const ACTS = {
     try { await deleteCustom(el.dataset.id); render(); } catch (e) { toast(e.message, 'err'); }
   },
   draftType: el => { syncDraft(); DR.type = el.dataset.id; renderCustom(); },
-  draftAdd: () => { syncDraft(); const id = $('#f-pick')?.value; if (id) DR.items.push(id); renderCustom(); },
+  step: el => {
+    const inp = $('#' + el.dataset.t); if (!inp) return;
+    const k = inp.dataset.k;
+    inp.value = cl(k, (Number(inp.value) || LIM[k][0]) + Number(el.dataset.d) * STEP[k]);
+    updateTotals();
+  },
+  draftAdd: el => {
+    syncDraft();
+    const id = el.dataset.id;
+    const src = id === 'custom' ? { name: 'Nuovo esercizio', contract: 5, rest: 5, reps: 10, sets: 1, setRest: 30 } : getEx(id);
+    if (src) DR.items.push(blockFrom(src));
+    renderCustom(true);
+  },
+  draftDup: el => { syncDraft(); const i = Number(el.dataset.id); DR.items.splice(i + 1, 0, { ...DR.items[i] }); renderCustom(); },
   draftDel: el => { syncDraft(); DR.items.splice(Number(el.dataset.id), 1); renderCustom(); },
   draftUp: el => { syncDraft(); const i = Number(el.dataset.id); if (i > 0) [DR.items[i - 1], DR.items[i]] = [DR.items[i], DR.items[i - 1]]; renderCustom(); },
   draftDown: el => { syncDraft(); const i = Number(el.dataset.id); if (i < DR.items.length - 1) [DR.items[i + 1], DR.items[i]] = [DR.items[i], DR.items[i + 1]]; renderCustom(); },
@@ -811,13 +868,11 @@ const ACTS = {
     if (!name) return toast('Dai un nome all\'allenamento', 'err');
     let e;
     if (d.type === 'circuit') {
-      const items = d.items.filter(id => getEx(id) && !isCircuit(getEx(id)));
-      if (items.length < 2) return toast('Un circuito ha bisogno di almeno due esercizi', 'err');
+      if (d.items.length < 2) return toast('Un circuito ha bisogno di almeno due esercizi', 'err');
       e = { id: d.id || undefined, name, description: d.description.trim(), contract: 1, rest: 1, reps: 1, sets: 1, setRest: 0,
-        circuit: { items, rounds: clamp(d.rounds, 1, 10), rest: clamp(d.cRest, 0, 60) } };
+        circuit: { items: d.items.map(blockFrom), rounds: cl('rounds', d.rounds), rest: cl('cRest', d.cRest) } };
     } else {
-      e = { id: d.id || undefined, name, description: d.description.trim(),
-        contract: clamp(d.contract, 1, 30), rest: clamp(d.rest, 1, 30), reps: clamp(d.reps, 1, 50), sets: clamp(d.sets, 1, 10), setRest: clamp(d.setRest, 0, 120) };
+      e = { id: d.id || undefined, name, description: d.description.trim(), ...BLOCK_KEYS.reduce((o, k) => (o[k] = cl(k, d[k]), o), {}) };
     }
     try { await saveCustom(e); closeModal(); S.exTab = 'mine'; render(); await checkTrophies(); }
     catch (err) { toast('Salvataggio non riuscito: ' + err.message, 'err'); }
@@ -876,11 +931,13 @@ const ACTS = {
   },
 };
 document.addEventListener('click', e => {
-  if (e.target.classList?.contains('modal-bg')) return closeModal();
+  if (e.target.classList?.contains('modal-bg')) return DR ? undefined : closeModal(); // l'editor non si chiude toccando fuori: eviti di perdere ciò che hai scritto
   const el = e.target.closest('[data-act]');
   if (el && ACTS[el.dataset.act]) ACTS[el.dataset.act](el, e);
 });
+document.addEventListener('input', e => { if (e.target.closest?.('.editor')) updateTotals(); });
 document.addEventListener('change', e => {
+  if (e.target.closest?.('.editor') && e.target.dataset?.k) { e.target.value = cl(e.target.dataset.k, e.target.value); updateTotals(); return; }
   const k = e.target.dataset?.change; if (!k) return;
   if (k === 'pfEx') { S.pf.ex = e.target.value; render(); }
   else if (k === 'pfRange') { S.pf.range = Number(e.target.value); render(); }

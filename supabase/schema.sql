@@ -91,3 +91,11 @@ grant execute on function public.delete_my_account() to authenticated;
 alter table public.custom_exercises
   add column if not exists circuit jsonb
   check (circuit is null or jsonb_typeof(circuit) = 'object');
+
+-- 8) Limiti più ampi (vedi anche supabase/limits.sql)
+alter table public.custom_exercises drop constraint if exists custom_exercises_contract_sec_check;
+alter table public.custom_exercises add constraint custom_exercises_contract_sec_check check (contract_sec between 1 and 120);
+alter table public.custom_exercises drop constraint if exists custom_exercises_rest_sec_check;
+alter table public.custom_exercises add constraint custom_exercises_rest_sec_check check (rest_sec between 1 and 120);
+alter table public.custom_exercises drop constraint if exists custom_exercises_reps_check;
+alter table public.custom_exercises add constraint custom_exercises_reps_check check (reps between 1 and 100);
