@@ -2,8 +2,8 @@
 -- Bucket PRIVATO "guide-media": ogni utente legge/carica/elimina solo la cartella che ha come nome il proprio ID utente.
 -- Si carica dall'app (Profilo → Animazione durante la contrazione).
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('guide-media', 'guide-media', false, 26214400, array['image/gif','image/webp','image/png','image/jpeg'])
-on conflict (id) do update set public = false, file_size_limit = 26214400, allowed_mime_types = array['image/gif','image/webp','image/png','image/jpeg'];
+values ('guide-media', 'guide-media', false, 26214400, array['image/gif','image/webp','image/png','image/jpeg','video/webm','video/mp4'])
+on conflict (id) do update set public = false, file_size_limit = 26214400, allowed_mime_types = array['image/gif','image/webp','image/png','image/jpeg','video/webm','video/mp4'];
 
 drop policy if exists "read own guide media" on storage.objects;
 create policy "read own guide media" on storage.objects for select to authenticated

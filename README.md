@@ -18,7 +18,7 @@ Senza configurare Supabase funziona comunque in *modalità ospite* (dati nel bro
 
 ## GIF durante la contrazione (opzionale)
 
-Esegui `supabase/guide_media.sql` nello SQL Editor (crea il bucket privato `guide-media`). Poi, dall'app: **Profilo → Animazioni durante la contrazione → Carica animazioni** (anche più di una, GIF o WebP animate). Le animazioni compaiono dentro il cerchio quando devi contrarre ed è visibile solo al tuo account.
+Esegui `supabase/guide_media.sql` nello SQL Editor (crea il bucket privato `guide-media`). Poi, dall'app: **Profilo → Animazioni durante la contrazione → Carica animazioni** (anche più di una: WebM, MP4, WebP o GIF). Le animazioni compaiono dentro il cerchio quando devi contrarre ed è visibile solo al tuo account.
 
 ## Come funziona il punteggio
 
