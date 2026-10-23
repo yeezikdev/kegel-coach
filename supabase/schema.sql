@@ -86,3 +86,8 @@ $$;
 
 revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
+
+-- 7) Circuiti (vedi anche supabase/circuits.sql)
+alter table public.custom_exercises
+  add column if not exists circuit jsonb
+  check (circuit is null or jsonb_typeof(circuit) = 'object');

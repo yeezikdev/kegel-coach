@@ -229,3 +229,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--sea)}
 @media (prefers-reduced-motion:reduce){.gate-orb{animation:none}}
 
 .btn.warn{background:var(--bad);color:var(--bg)}
+
+/* circuiti */
+.cir-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.cir-n{flex:none;width:28px;height:28px;border-radius:50%;background:var(--sea-soft);color:var(--ink);display:grid;place-content:center;font-size:.85rem;font-weight:600}
+.link[disabled]{opacity:.35;cursor:default}

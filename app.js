@@ -55,24 +55,42 @@ const PROGRAMS = [
 const allEx = () => [...DEFAULTS, ...S.customs];
 const getEx = id => allEx().find(e => e.id === id);
 
+const isCircuit = e => !!e?.circuit?.items;
+const circuitComps = e => e.circuit.items.map(getEx).filter(c => c && !isCircuit(c));
+const circuitNames = e => isCircuit(e) ? circuitComps(e).map(c => c.name).join(' → ') : '';
+
 function buildSteps(ex) {
-  const st = [{ t: 'prep', d: 3 }];
+  if (isCircuit(ex)) { // circuito: esercizi in sequenza, ripetuti per il numero di giri
+    const comps = circuitComps(ex), { rounds, rest } = ex.circuit;
+    const st = [{ t: 'prep', d: 3, name: ex.name }];
+    for (let g = 1; g <= rounds; g++) {
+      comps.forEach((c, i) => {
+        st.push(...buildSteps(c).slice(1).map(x => ({ ...x, name: c.name, round: g, rounds })));
+        const last = g === rounds && i === comps.length - 1;
+        if (!last && rest > 0) st.push({ t: 'setrest', d: rest, between: true, name: c.name, next: comps[(i + 1) % comps.length].name, round: g, rounds });
+      });
+    }
+    return comps.length ? st : [st[0]];
+  }
+  const st = [{ t: 'prep', d: 3, name: ex.name }];
   for (let s = 1; s <= ex.sets; s++) {
     for (let r = 1; r <= ex.reps; r++) {
-      st.push({ t: 'contract', d: ex.contract, s, r });
-      if (r < ex.reps) st.push({ t: 'rest', d: ex.rest, s, r });
+      st.push({ t: 'contract', d: ex.contract, s, r, name: ex.name, nsets: ex.sets, nreps: ex.reps });
+      if (r < ex.reps) st.push({ t: 'rest', d: ex.rest, s, r, name: ex.name, nsets: ex.sets, nreps: ex.reps });
     }
-    if (s < ex.sets) st.push({ t: 'setrest', d: Math.max(ex.setRest, ex.rest), s, r: ex.reps });
+    if (s < ex.sets) st.push({ t: 'setrest', d: Math.max(ex.setRest, ex.rest), s, r: ex.reps, name: ex.name, nsets: ex.sets, nreps: ex.reps });
   }
   return st;
 }
 const secsOf = ex => buildSteps(ex).reduce((a, s) => a + s.d, 0);
 const minsLabel = secs => secs < 90 ? `${Math.round(secs)} sec` : `~${Math.round(secs / 60)} min`;
-const exMeta = e => `${e.contract}s contrazione · ${e.rest}s riposo · ${e.reps} rip × ${e.sets} serie · ${minsLabel(secsOf(e))}`;
+const exMeta = e => isCircuit(e)
+  ? `Circuito · ${e.circuit.items.length} esercizi × ${e.circuit.rounds} ${e.circuit.rounds === 1 ? 'giro' : 'giri'} · ${minsLabel(secsOf(e))}`
+  : `${e.contract}s contrazione · ${e.rest}s riposo · ${e.reps} rip × ${e.sets} serie · ${minsLabel(secsOf(e))}`;
 
 /* ───────── data layer (cloud o locale) ───────── */
-const exFromRow = r => ({ id: r.id, name: r.name, description: r.description || '', contract: r.contract_sec, rest: r.rest_sec, reps: r.reps, sets: r.sets, setRest: r.set_rest_sec, custom: true });
-const exToRow = e => ({ name: e.name, description: e.description, contract_sec: e.contract, rest_sec: e.rest, reps: e.reps, sets: e.sets, set_rest_sec: e.setRest });
+const exFromRow = r => ({ id: r.id, name: r.name, description: r.description || '', contract: r.contract_sec, rest: r.rest_sec, reps: r.reps, sets: r.sets, setRest: r.set_rest_sec, custom: true, ...(r.circuit ? { circuit: r.circuit } : {}) });
+const exToRow = e => ({ name: e.name, description: e.description, contract_sec: e.contract, rest_sec: e.rest, reps: e.reps, sets: e.sets, set_rest_sec: e.setRest, ...(e.circuit ? { circuit: e.circuit } : {}) });
 
 async function loadData() {
   if (cloud()) {
@@ -168,6 +186,7 @@ const T = [
   { id: 'n90', tier: 'silver', name: 'Qualità costante', desc: 'Ottieni 90+ in 5 esercizi', test: c => c.st.n90 >= 5, prog: c => [c.st.n90, 5] },
   { id: 'master', tier: 'gold', name: 'Maestro della tenuta', desc: 'Ottieni 90+ in "Tenuta lunga"', test: () => S.sessions.some(s => s.exercise_id === 'd-tenuta' && s.score >= 90) },
   { id: 'maker', tier: 'bronze', name: 'Creatore', desc: 'Crea un tuo esercizio', test: c => c.st.customs >= 1 },
+  { id: 'circuit', tier: 'bronze', name: 'Costruttore di circuiti', desc: 'Crea un circuito con più esercizi', test: () => S.customs.some(isCircuit) },
   { id: 'early', tier: 'bronze', name: 'Mattiniero', desc: 'Allenati prima delle 8:00', test: () => S.sessions.some(s => hourOf(s) < 8) },
   { id: 'late', tier: 'bronze', name: 'Nottambulo', desc: 'Allenati dopo le 22:00', test: () => S.sessions.some(s => hourOf(s) >= 22) },
   { id: 'prog', tier: 'silver', name: 'Programma completato', desc: 'Completa un programma intero dall\'inizio alla fine', test: c => c.event === 'program' },
@@ -357,7 +376,7 @@ function itemRow(title, desc, meta, tag, act, id, extra) {
     ${desc ? `<p class="desc">${esc(desc)}</p>` : ''}<p class="meta">${meta}</p>${extra || ''}</div>
     <button class="play" data-act="${act}" data-id="${esc(id)}" aria-label="Avvia ${esc(title)}">${icon('play', 22, true)}</button></article>`;
 }
-const exRow = e => itemRow(e.name, e.description, exMeta(e), e.custom ? 'Mio' : '', 'startEx', e.id,
+const exRow = e => itemRow(e.name, e.description || circuitNames(e), exMeta(e), e.custom ? (isCircuit(e) ? 'Circuito' : 'Mio') : '', 'startEx', e.id,
   e.custom ? `<div class="item-act"><button class="link" data-act="editCustom" data-id="${esc(e.id)}">Modifica</button><button class="link danger" data-act="delCustom" data-id="${esc(e.id)}">Elimina</button></div>` : '');
 
 function vExercises() {
@@ -373,7 +392,7 @@ function vExercises() {
   } else if (tab === 'all') {
     body = allEx().map(exRow).join('');
   } else {
-    body = `<button class="btn pri add" data-act="newCustom">${'Crea un esercizio'}</button>` +
+    body = `<button class="btn pri add" data-act="newCustom">Crea esercizio o circuito</button>` +
       (S.customs.length ? S.customs.map(exRow).join('') : `<p class="empty">Qui compariranno i tuoi esercizi.<br>Scegli tu contrazione, riposo, ripetizioni e serie.</p>`);
   }
   return `<h1>Esercizi</h1>${subs}${body}`;
@@ -481,21 +500,57 @@ function vProfile() {
 }
 
 /* ───────── modal esercizio personalizzato ───────── */
+let DR = null; // bozza dell'esercizio nel modal
+function newDraft(id) {
+  const e = id ? S.customs.find(x => x.id === id) : null;
+  const base = { id: '', type: 'single', name: '', description: '', contract: 5, rest: 5, reps: 10, sets: 1, setRest: 30, items: [], rounds: 2, cRest: 10 };
+  if (!e) return base;
+  return isCircuit(e)
+    ? { ...base, id: e.id, type: 'circuit', name: e.name, description: e.description || '', items: [...e.circuit.items], rounds: e.circuit.rounds, cRest: e.circuit.rest }
+    : { ...base, id: e.id, name: e.name, description: e.description || '', contract: e.contract, rest: e.rest, reps: e.reps, sets: e.sets, setRest: e.setRest };
+}
+function syncDraft() { // copia nella bozza ciò che è scritto nei campi
+  if (!DR || !$('#f-name')) return;
+  DR.name = $('#f-name').value; DR.description = $('#f-desc').value;
+  const val = (k, fallback) => { const v = $('#f-' + k).value; return v === '' ? fallback : Number(v); };
+  if (DR.type === 'single') for (const k of ['contract', 'rest', 'reps', 'sets', 'setRest']) DR[k] = val(k, DR[k]);
+  else { DR.rounds = val('rounds', DR.rounds); DR.cRest = val('cRest', DR.cRest); }
+}
+function renderCustom() {
+  const d = DR, isNew = !d.id;
+  const num = (k, l, min, max) => `<div><label for="f-${k}">${l}</label><input id="f-${k}" type="number" min="${min}" max="${max}" value="${d[k]}" inputmode="numeric"></div>`;
+  const pool = allEx().filter(e => !isCircuit(e) && e.id !== d.id);
+  let body;
+  if (d.type === 'single') {
+    body = `<div class="grid2">${num('contract', 'Contrazione (sec)', 1, 30)}${num('rest', 'Riposo (sec)', 1, 30)}
+      ${num('reps', 'Ripetizioni', 1, 50)}${num('sets', 'Serie', 1, 10)}</div>${num('setRest', 'Pausa tra le serie (sec)', 0, 120)}`;
+  } else {
+    const secs = d.items.length ? secsOf({ name: d.name, circuit: { items: d.items, rounds: clamp(d.rounds, 1, 10), rest: clamp(d.cRest, 0, 60) } }) : 0;
+    body = `<h3 style="margin-top:22px">Esercizi del circuito</h3>
+    ${d.items.length ? d.items.map((id, i) => `<div class="cir-item"><span class="cir-n">${i + 1}</span><span class="grow">${esc(getEx(id)?.name || 'Esercizio eliminato')}</span>
+      <button type="button" class="link" data-act="draftUp" data-id="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Sposta su">Su</button>
+      <button type="button" class="link" data-act="draftDown" data-id="${i}" ${i === d.items.length - 1 ? 'disabled' : ''} aria-label="Sposta giù">Giù</button>
+      <button type="button" class="link danger" data-act="draftDel" data-id="${i}">Togli</button></div>`).join('')
+      : '<p class="sm mut" style="margin-top:8px">Aggiungi almeno due esercizi: puoi ripetere lo stesso più volte.</p>'}
+    <div class="row" style="margin-top:14px"><select id="f-pick" style="flex:1" aria-label="Esercizio da aggiungere">${pool.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('')}</select>
+      <button type="button" class="btn sm" data-act="draftAdd">Aggiungi</button></div>
+    <div class="grid2">${num('rounds', 'Giri', 1, 10)}${num('cRest', 'Pausa tra esercizi (sec)', 0, 60)}</div>
+    ${secs ? `<p class="sm mut" style="margin-top:12px">Durata stimata: ${minsLabel(secs)}</p>` : ''}`;
+  }
+  $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Esercizio personalizzato">
+    <h2>${isNew ? 'Nuovo allenamento' : 'Modifica'}</h2>
+    ${isNew ? `<nav class="subtabs" aria-label="Tipo"><button class="${d.type === 'single' ? 'on' : ''}" data-act="draftType" data-id="single">Esercizio singolo</button><button class="${d.type === 'circuit' ? 'on' : ''}" data-act="draftType" data-id="circuit">Circuito</button></nav>` : ''}
+    <label for="f-name">Nome</label><input id="f-name" maxlength="60" value="${esc(d.name)}" placeholder="${d.type === 'circuit' ? 'Es. Circuito serale' : 'Es. Tenuta serale'}">
+    <label for="f-desc">Note (facoltative)</label><textarea id="f-desc" rows="2" maxlength="300">${esc(d.description)}</textarea>
+    ${body}
+    <div class="row" style="margin-top:22px"><button class="btn ghost grow" data-act="closeModal">Annulla</button>
+      <button class="btn pri grow" data-act="saveCustom">Salva</button></div></div></div>`;
+}
 function openCustom(id) {
-  const e = id ? S.customs.find(x => x.id === id) : { name: '', description: '', contract: 5, rest: 5, reps: 10, sets: 1, setRest: 30 };
-  const num = (k, l, min, max) => `<div><label for="f-${k}">${l}</label><input id="f-${k}" type="number" min="${min}" max="${max}" value="${e[k]}" inputmode="numeric"></div>`;
-  $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Esercizio">
-    <h2>${id ? 'Modifica esercizio' : 'Nuovo esercizio'}</h2>
-    <label for="f-name">Nome</label><input id="f-name" maxlength="60" value="${esc(e.name)}" placeholder="Es. Tenuta serale">
-    <label for="f-desc">Note (facoltative)</label><textarea id="f-desc" rows="2" maxlength="300">${esc(e.description)}</textarea>
-    <div class="grid2">${num('contract', 'Contrazione (sec)', 1, 30)}${num('rest', 'Riposo (sec)', 1, 30)}
-      ${num('reps', 'Ripetizioni', 1, 50)}${num('sets', 'Serie', 1, 10)}</div>
-    ${num('setRest', 'Pausa tra le serie (sec)', 0, 120)}
-    <div class="row" style="margin-top:18px"><button class="btn grow" data-act="closeModal">Annulla</button>
-      <button class="btn pri grow" data-act="saveCustom" data-id="${id ? esc(id) : ''}">Salva</button></div></div></div>`;
+  DR = newDraft(id); renderCustom();
   if (matchMedia('(hover:hover)').matches) $('#f-name')?.focus(); // su touch niente focus automatico (coprirebbe il form con la tastiera)
 }
-const closeModal = () => { $('#modal').innerHTML = ''; };
+const closeModal = () => { $('#modal').innerHTML = ''; DR = null; };
 
 const infoBtn = (label = 'Come si calcola lo score') => `<button class="info-btn" data-act="scoreInfo">${icon('info', 18)}<span>${label}</span></button>`;
 function openScoreInfo() {
@@ -533,11 +588,13 @@ function startRun(list, programId) {
 }
 function loadExercise() {
   const ex = R.queue[R.qi];
-  Object.assign(R, { ex, steps: buildSteps(ex), i: 0, paused: false, done: 0, missed: false, elapsed: 0, totalReps: ex.reps * ex.sets });
+  Object.assign(R, { ex, steps: buildSteps(ex), i: 0, paused: false, done: 0, missed: false, elapsed: 0, totalReps: 0 });
+  R.totalReps = R.steps.filter(x => x.t === 'contract').length;
+  if (!R.totalReps) { toast('Questo circuito non ha esercizi disponibili. Modificalo e aggiungine.', 'err'); return endRun(); }
   R.left = R.steps[0].d;
   $('#runner').innerHTML = `<div class="run" id="r-run" data-phase="prep" role="dialog" aria-label="Allenamento">
     <div class="run-top"><button class="round" data-act="runQuit" aria-label="Esci dall'allenamento">${icon('close')}</button>
-      <div class="t">Esercizio ${R.qi + 1} di ${R.queue.length}<b>${esc(ex.name)}</b></div>
+      <div class="t">${R.queue.length > 1 ? `Esercizio ${R.qi + 1} di ${R.queue.length}` : isCircuit(ex) ? 'Circuito' : 'Esercizio'}<b id="r-name">${esc(ex.name)}</b></div>
       <button class="round" id="r-pause" data-act="runPause" aria-label="Pausa">${icon('pause')}</button></div>
     <div class="orb-wrap"><svg viewBox="0 0 200 200"><circle class="ring-bg" cx="100" cy="100" r="92"/><circle class="ring" id="r-ring" cx="100" cy="100" r="92"/></svg>
       <div class="orb prep" id="r-orb"></div>
@@ -549,6 +606,7 @@ function loadExercise() {
   clearInterval(R.timer);
   R.timer = setInterval(tick, 100);
 }
+const hintFor = st => st.between ? `Prossimo esercizio: ${st.next}` : HINT[st.t];
 const HINT = {
   prep: 'Mettiti comodo e respira. Rilassa addome, glutei e cosce.',
   contract: 'Stringi e solleva i muscoli pelvici. Respira normalmente.',
@@ -562,9 +620,13 @@ function enterStep(first) {
   orb.style.transitionDuration = Math.min(st.d * .7, 1.6) + 's';
   orb.className = 'orb ' + (st.t === 'contract' ? 'on' : st.t === 'prep' ? 'prep' : '');
   $('#r-cue').textContent = { prep: 'Preparati', contract: 'Contrai', rest: 'Rilascia', setrest: 'Pausa' }[st.t];
-  $('#r-hint').textContent = HINT[st.t];
-  $('#r-info').textContent = st.t === 'prep' ? `${R.ex.reps} ripetizioni × ${R.ex.sets} serie`
-    : `Serie ${st.s} di ${R.ex.sets} · Ripetizione ${st.r} di ${R.ex.reps}`;
+  $('#r-hint').textContent = hintFor(st);
+  $('#r-name').textContent = st.name || R.ex.name;
+  const giro = st.round ? `Giro ${st.round} di ${st.rounds}` : '';
+  $('#r-info').textContent = st.t === 'prep'
+    ? (isCircuit(R.ex) ? `${circuitComps(R.ex).length} esercizi × ${R.ex.circuit.rounds} ${R.ex.circuit.rounds === 1 ? 'giro' : 'giri'} · ${R.totalReps} ripetizioni` : `${R.ex.reps} ripetizioni × ${R.ex.sets} serie`)
+    : st.between ? giro
+    : [giro, `Serie ${st.s} di ${st.nsets} · Ripetizione ${st.r} di ${st.nreps}`].filter(Boolean).join(' · ');
   const miss = $('#r-miss');
   miss.style.visibility = st.t === 'contract' ? 'visible' : 'hidden';
   miss.textContent = 'Non ci riesco';
@@ -659,9 +721,10 @@ async function maybeImportLocal() {
   if (!confirm('Ci sono dati salvati su questo dispositivo (modalità ospite). Vuoi importarli nel tuo account?')) return;
   try {
     const idMap = {};
-    for (const e of d.customs || []) {
+    for (const e0 of [...(d.customs || [])].sort((a, b) => isCircuit(a) - isCircuit(b))) { // prima i singoli, poi i circuiti
+      const e = isCircuit(e0) ? { ...e0, circuit: { ...e0.circuit, items: e0.circuit.items.map(i => idMap[i] || i) } } : e0;
       const { data, error } = await sb.from('custom_exercises').insert(exToRow(e)).select().single();
-      if (error) throw error; idMap[e.id] = data.id;
+      if (error) throw error; idMap[e0.id] = data.id;
     }
     const rows = (d.sessions || []).map(s => ({ exercise_id: idMap[s.exercise_id] || s.exercise_id, exercise_name: s.exercise_name,
       score: s.score, completed_reps: s.completed_reps, total_reps: s.total_reps, quality: s.quality, duration_sec: s.duration_sec, day: s.day, created_at: s.created_at }));
@@ -687,16 +750,29 @@ const ACTS = {
     if (!confirm('Eliminare questo esercizio? Lo storico dei punteggi resta.')) return;
     try { await deleteCustom(el.dataset.id); render(); } catch (e) { toast(e.message, 'err'); }
   },
-  saveCustom: async el => {
-    const name = $('#f-name').value.trim();
-    if (!name) return toast('Dai un nome all\'esercizio', 'err');
-    const e = { id: el.dataset.id || undefined, name, description: $('#f-desc').value.trim(),
-      contract: clamp($('#f-contract').value, 1, 30), rest: clamp($('#f-rest').value, 1, 30),
-      reps: clamp($('#f-reps').value, 1, 50), sets: clamp($('#f-sets').value, 1, 10), setRest: clamp($('#f-setRest').value || 0, 0, 120) };
+  draftType: el => { syncDraft(); DR.type = el.dataset.id; renderCustom(); },
+  draftAdd: () => { syncDraft(); const id = $('#f-pick')?.value; if (id) DR.items.push(id); renderCustom(); },
+  draftDel: el => { syncDraft(); DR.items.splice(Number(el.dataset.id), 1); renderCustom(); },
+  draftUp: el => { syncDraft(); const i = Number(el.dataset.id); if (i > 0) [DR.items[i - 1], DR.items[i]] = [DR.items[i], DR.items[i - 1]]; renderCustom(); },
+  draftDown: el => { syncDraft(); const i = Number(el.dataset.id); if (i < DR.items.length - 1) [DR.items[i + 1], DR.items[i]] = [DR.items[i], DR.items[i + 1]]; renderCustom(); },
+  saveCustom: async () => {
+    syncDraft();
+    const d = DR, name = d.name.trim();
+    if (!name) return toast('Dai un nome all\'allenamento', 'err');
+    let e;
+    if (d.type === 'circuit') {
+      const items = d.items.filter(id => getEx(id) && !isCircuit(getEx(id)));
+      if (items.length < 2) return toast('Un circuito ha bisogno di almeno due esercizi', 'err');
+      e = { id: d.id || undefined, name, description: d.description.trim(), contract: 1, rest: 1, reps: 1, sets: 1, setRest: 0,
+        circuit: { items, rounds: clamp(d.rounds, 1, 10), rest: clamp(d.cRest, 0, 60) } };
+    } else {
+      e = { id: d.id || undefined, name, description: d.description.trim(),
+        contract: clamp(d.contract, 1, 30), rest: clamp(d.rest, 1, 30), reps: clamp(d.reps, 1, 50), sets: clamp(d.sets, 1, 10), setRest: clamp(d.setRest, 0, 120) };
+    }
     try { await saveCustom(e); closeModal(); S.exTab = 'mine'; render(); await checkTrophies(); }
     catch (err) { toast('Salvataggio non riuscito: ' + err.message, 'err'); }
   },
-  runPause: el => { if (!R) return; R.paused = !R.paused; el.innerHTML = icon(R.paused ? 'play' : 'pause', 22, R.paused); el.setAttribute('aria-label', R.paused ? 'Riprendi' : 'Pausa'); $('#r-hint').textContent = R.paused ? 'In pausa' : HINT[R.steps[R.i].t]; },
+  runPause: el => { if (!R) return; R.paused = !R.paused; el.innerHTML = icon(R.paused ? 'play' : 'pause', 22, R.paused); el.setAttribute('aria-label', R.paused ? 'Riprendi' : 'Pausa'); $('#r-hint').textContent = R.paused ? 'In pausa' : hintFor(R.steps[R.i]); },
   runMiss: el => { if (!R) return; R.missed = true; el.textContent = 'Ripetizione segnata come mancata'; el.disabled = true; },
   runQuit: () => { if (confirm('Interrompere l\'allenamento? I risultati di questo esercizio non verranno salvati.')) endRun(); },
   rate: el => {
