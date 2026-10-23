@@ -20,7 +20,7 @@ const sb = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)
 /* ───────── stato ───────── */
 const S = {
   user: null, sessions: [], customs: [], trophies: {},
-  exTab: 'programs', pf: { ex: 'all', range: 30 },
+  exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
   settings: { sound: true, vibrate: true },
 };
 const LS = 'kegel-coach:v1', LSS = 'kegel-coach:settings';
@@ -241,7 +241,37 @@ const vibrate = p => { if (S.settings.vibrate && navigator.vibrate) try { naviga
 const VIEWS = { home: vHome, exercises: vExercises, progress: vProgress, trophies: vTrophies, profile: vProfile };
 const routeName = () => { const r = (location.hash.replace(/^#\//, '') || 'home').split('?')[0]; return VIEWS[r] ? r : 'home'; };
 
+const authRequired = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY);
+function authGate() {
+  if (!authRequired) return null;                 // senza Supabase: modalità locale (solo sviluppo/anteprima)
+  if (!sb) return gateShell(`<h1>Kegel Coach</h1><p class="mut">Non riesco a collegarmi al servizio di accesso. Controlla la connessione e ricarica la pagina.</p>
+    <button class="btn pri big" onclick="location.reload()">Ricarica</button>`);
+  if (!S.ready) return gateShell('<p class="mut">Un attimo…</p>');
+  if (S.recovery) return gateShell(`<h1>Nuova password</h1><p class="mut">Scegli una nuova password per il tuo account.</p>
+    <form data-form="recover"><label for="np">Nuova password (almeno 6 caratteri)</label>
+    <input id="np" type="password" autocomplete="new-password" minlength="6" required>
+    <button class="btn pri big" type="submit" style="margin-top:20px">Salva password</button></form>`);
+  if (!S.user) {
+    const up = S.authMode === 'up';
+    return gateShell(`<h1>Kegel Coach</h1>
+    <p class="mut">Cinque minuti al giorno per allenare i muscoli pelvici.</p>
+    <nav class="subtabs" aria-label="Accesso"><button class="${up ? '' : 'on'}" data-act="authMode" data-id="in">Accedi</button><button class="${up ? 'on' : ''}" data-act="authMode" data-id="up">Registrati</button></nav>
+    <form data-form="auth">
+      <label for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email" required>
+      <label for="pw">Password${up ? ' (almeno 6 caratteri)' : ''}</label><input id="pw" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" minlength="6" required>
+      <button class="btn pri big" type="submit" style="margin-top:22px">${up ? 'Crea account' : 'Accedi'}</button>
+    </form>
+    ${up ? '' : '<p class="center" style="margin-top:14px"><button class="link" data-act="forgot">Password dimenticata?</button></p>'}
+    <p class="fine">Gli esercizi non sostituiscono il parere medico.</p>`);
+  }
+  return null;
+}
+const gateShell = inner => `<section class="gate"><div class="gate-orb" aria-hidden="true"></div>${inner}</section>`;
+
 function render() {
+  const gate = authGate();
+  document.body.classList.toggle('gated', !!gate);
+  if (gate) { $('#view').innerHTML = gate; return; }
   const r = routeName();
   $('#view').innerHTML = VIEWS[r]();
   document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === r));
@@ -280,7 +310,6 @@ function vHome() {
   const note = risk ? `<p class="note warn">La serie di <b>${st.streak} ${st.streak === 1 ? 'giorno' : 'giorni'}</b> si chiude a mezzanotte.</p>`
     : `<p class="note">${st.best > st.streak ? `Il tuo record è ${st.best} giorni.` : st.streak ? 'Questo è il tuo record. Continua così.' : 'Il primo allenamento avvia la serie.'}</p>`;
   return `
-  ${sb && !S.user ? `<div class="banner">Stai usando la modalità ospite: i dati restano su questo dispositivo. <a href="#/profile">Accedi</a> per salvarli nel cloud.</div>` : ''}
   <section class="hero">
     <p class="greet">${greeting()}</p>
     <h1>${st.doneToday ? 'Per oggi hai finito.' : 'Pronto per oggi?'}</h1>
@@ -580,18 +609,28 @@ async function saveRun() {
 function endRun() { if (R?.timer) clearInterval(R.timer); R = null; dropWake(); $('#runner').innerHTML = ''; render(); }
 
 /* ───────── auth ───────── */
+const AUTH_ERR = {
+  'Invalid login credentials': 'Email o password non corrette.',
+  'User already registered': 'Esiste già un account con questa email. Prova ad accedere.',
+  'Email not confirmed': 'Conferma prima l\'email: ti abbiamo mandato un link.',
+};
+const authMsg = e => AUTH_ERR[e.message] || e.message;
 async function authDo(kind) {
   const email = $('#em')?.value.trim(), password = $('#pw')?.value;
   if (!email || !password) return toast('Inserisci email e password', 'err');
   if (password.length < 6) return toast('La password deve avere almeno 6 caratteri', 'err');
-  if (kind === 'up') {
-    const { data, error } = await sb.auth.signUp({ email, password });
-    if (error) return toast(error.message, 'err');
-    if (!data.session) toast('Registrazione quasi fatta: controlla la tua email per confermare.');
-  } else {
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) return toast(error.message, 'err');
-  }
+  const btn = $('form[data-form=auth] button[type=submit]'); if (btn) btn.disabled = true;
+  try {
+    if (kind === 'up') {
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) return toast(authMsg(error), 'err');
+      if (!data.session) { toast('Quasi fatto: controlla la tua email e conferma l\'account, poi accedi.'); S.authMode = 'in'; render(); }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) return toast(authMsg(error), 'err');
+    }
+  } catch (e) { toast('Connessione non riuscita. Riprova.', 'err'); }
+  finally { if (btn) btn.disabled = false; }
 }
 async function maybeImportLocal() {
   const d = lsRead();
@@ -647,8 +686,13 @@ const ACTS = {
   saveRun,
   runNext: () => { R.qi++; loadExercise(); },
   runDone: endRun,
-  signin: () => authDo('in'),
-  signup: () => authDo('up'),
+  authMode: el => { S.authMode = el.dataset.id; render(); },
+  forgot: async () => {
+    const email = $('#em')?.value.trim();
+    if (!email) return toast('Scrivi la tua email, poi tocca "Password dimenticata?"', 'err');
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    toast(error ? authMsg(error) : 'Ti abbiamo mandato un\'email per reimpostare la password.', error ? 'err' : '');
+  },
   signout: async () => { await sb.auth.signOut(); },
   export: () => {
     const blob = new Blob([JSON.stringify({ sessions: S.sessions, customs: S.customs, trophies: S.trophies }, null, 2)], { type: 'application/json' });
@@ -672,6 +716,17 @@ document.addEventListener('change', e => {
   else if (k === 'pfRange') { S.pf.range = Number(e.target.value); render(); }
   else if (k === 'sound' || k === 'vibrate') { S.settings[k] = e.target.checked; saveSettings(); }
 });
+document.addEventListener('submit', async e => {
+  const f = e.target.dataset?.form; if (!f) return;
+  e.preventDefault();
+  if (f === 'auth') authDo(S.authMode === 'up' ? 'up' : 'in');
+  if (f === 'recover') {
+    const password = $('#np').value;
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) return toast(authMsg(error), 'err');
+    S.recovery = false; toast('Password aggiornata.'); location.hash = '#/home'; render();
+  }
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#modal').innerHTML) closeModal(); });
 
 /* ───────── avvio ───────── */
@@ -682,18 +737,22 @@ async function boot() {
   render();
 }
 if (sb) {
-  sb.auth.onAuthStateChange((_ev, session) => {
+  sb.auth.onAuthStateChange((ev, session) => {
     const u = session?.user || null;
-    if (booted && (u?.id || null) === (S.user?.id || null)) return;
+    if (ev === 'PASSWORD_RECOVERY') S.recovery = true;
+    if (booted && (u?.id || null) === (S.user?.id || null)) { if (ev === 'PASSWORD_RECOVERY') setTimeout(render, 0); return; }
+    const wasOut = !S.user;
     booted = true; S.user = u;
     setTimeout(async () => { // fuori dal callback, come raccomanda Supabase
       await loadData();
       if (u) await maybeImportLocal();
-      await checkTrophies();
-      if (u && routeName() === 'profile') location.hash = '#/home';
+      S.ready = true;
+      if (u) await checkTrophies();
+      if (u && wasOut) location.hash = '#/home';
       render();
     }, 0);
   });
+  render(); // mostra subito il caricamento
 } else {
   boot();
 }
