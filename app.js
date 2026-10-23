@@ -20,7 +20,7 @@ const sb = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)
 /* ───────── stato ───────── */
 const S = {
   user: null, sessions: [], customs: [], trophies: {},
-  endImgs: [], endImgsAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
+  showAll: false, endImgs: [], endImgsAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
   settings: { sound: true, vibrate: true },
 };
 const LS = 'kegel-coach:v1', LSS = 'kegel-coach:settings';
@@ -137,6 +137,11 @@ async function saveCustom(e) { // e.id presente = update
     else S.customs.push({ ...e, id: uid(), custom: true });
     lsSave();
   }
+}
+async function deleteSession(id) {
+  if (cloud()) { const { error } = await sb.from('sessions').delete().eq('id', id); if (error) throw error; }
+  S.sessions = S.sessions.filter(s => s.id !== id);
+  lsSave();
 }
 async function deleteCustom(id) {
   if (cloud()) { const { error } = await sb.from('custom_exercises').delete().eq('id', id); if (error) throw error; }
@@ -433,7 +438,7 @@ function vProgress() {
   list.forEach(s => (byDay[s.day] = byDay[s.day] || []).push(s.score));
   const pts = Object.keys(byDay).sort().map(k => ({ x: parseDay(k), y: Math.round(byDay[k].reduce((a, b) => a + b, 0) / byDay[k].length) }));
   const used = [...new Map(S.sessions.map(s => [s.exercise_id, s.exercise_name])).entries()];
-  const recent = [...S.sessions].reverse().slice(0, 8);
+  const all = [...S.sessions].reverse(), recent = S.showAll ? all : all.slice(0, 8);
   return `<h1>Progressi</h1>
   <section class="figs"><div><b>${st.avg}</b><span>score medio</span></div><div><b>${st.max}</b><span>record</span></div><div><b>${st.mins}</b><span>minuti</span></div></section>
   <section class="figs" style="border:0;padding-top:0;margin-top:20px"><div><b>${st.total}</b><span>allenamenti</span></div><div><b>${st.streak}</b><span>streak attuale</span></div><div><b>${st.best}</b><span>streak record</span></div></section>
@@ -445,8 +450,10 @@ function vProgress() {
         ${[[30, 'Ultimi 30 giorni'], [90, 'Ultimi 90 giorni'], [0, 'Sempre']].map(([v, l]) => `<option value="${v}" ${v === range ? 'selected' : ''}>${l}</option>`).join('')}</select>
     </div>${chartSvg(pts)}</section>
   <section><h2>Costanza</h2><p class="sm mut" style="margin-bottom:10px">Le ultime 16 settimane</p>${heatmap()}</section>
-  <section><h2>Ultimi allenamenti</h2>${recent.map(s => `<div class="list-i"><div><b>${esc(s.exercise_name)}</b>
-    <div class="sm mut">${fmtDate(parseDay(s.day))} · ${s.completed_reps}/${s.total_reps} ripetizioni · controllo ${s.quality}/5</div></div><div class="score">${s.score}</div></div>`).join('')}</section>`;
+  <section><h2>Allenamenti</h2>${recent.map(s => `<div class="list-i"><div><b>${esc(s.exercise_name)}</b>
+    <div class="sm mut">${fmtDate(parseDay(s.day))}, ${new Date(s.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} · ${s.completed_reps}/${s.total_reps} ripetizioni · controllo ${s.quality}/5</div>
+    <button class="link danger" data-act="delSession" data-id="${esc(s.id)}" aria-label="Elimina allenamento ${esc(s.exercise_name)} del ${fmtDate(parseDay(s.day))}">Elimina</button></div><div class="score">${s.score}</div></div>`).join('')}
+    ${all.length > 8 ? `<button class="link" style="margin-top:12px" data-act="toggleAll">${S.showAll ? 'Mostra meno' : `Mostra tutti (${all.length})`}</button>` : ''}</section>`;
 }
 
 function vTrophies() {
@@ -775,6 +782,12 @@ const ACTS = {
   editCustom: el => openCustom(el.dataset.id),
   closeModal,
   scoreInfo: openScoreInfo,
+  toggleAll: () => { S.showAll = !S.showAll; render(); },
+  delSession: async el => {
+    const x = S.sessions.find(q => q.id === el.dataset.id); if (!x) return;
+    if (!confirm(`Eliminare questo allenamento?\n${x.exercise_name}, ${fmtDate(parseDay(x.day))}, ${x.score} punti.\nNon si può annullare.`)) return;
+    try { await deleteSession(x.id); render(); toast('Allenamento eliminato'); } catch (e) { toast('Eliminazione non riuscita: ' + e.message, 'err'); }
+  },
   delCustom: async el => {
     if (!confirm('Eliminare questo esercizio? Lo storico dei punteggi resta.')) return;
     try { await deleteCustom(el.dataset.id); render(); } catch (e) { toast(e.message, 'err'); }
