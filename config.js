@@ -4,5 +4,7 @@
 // NON mettere mai qui la "service_role" key.
 window.KEGEL_CONFIG = {
   SUPABASE_URL: "https://wnzzviumwpybprcuurrq.supabase.co",
-  SUPABASE_ANON_KEY: "sb_publishable_XPEyPjsno6FRP_52zetJxg_FqCKCqCJ"
+  SUPABASE_ANON_KEY: "sb_publishable_XPEyPjsno6FRP_52zetJxg_FqCKCqCJ",
+  // Immagini mostrate a rotazione a fine esercizio (percorsi relativi, es. "img/fine/1.webp").
+  END_IMAGES: []
 };

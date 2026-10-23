@@ -679,6 +679,7 @@ async function saveRun() {
   await checkTrophies(last && R.program ? 'program' : null);
   const st = stats();
   $('#runner').innerHTML = `<div class="run"><div class="sheet" style="margin:auto">
+    ${endImage()}
     <p class="mut">${esc(R.ex.name)}</p><div class="bigscore">${score}</div><p class="mut">punti su 100</p>
     ${infoBtn()}
     <div style="margin:28px 0">
@@ -687,6 +688,15 @@ async function saveRun() {
       <div class="list-i"><span>Streak</span><b>${st.streak} ${st.streak === 1 ? 'giorno' : 'giorni'}</b></div></div>
     ${last ? `<button class="btn pri big" data-act="runDone">Fine</button>`
       : `<button class="btn pri big" data-act="runNext">Prossimo: ${esc(R.queue[R.qi + 1].name)}</button>`}</div></div>`;
+}
+function endImage() { // immagine a rotazione a fine esercizio (elenco in config.js → END_IMAGES)
+  const list = (cfg.END_IMAGES || []).filter(Boolean);
+  if (!list.length) return '';
+  let last = -1; try { last = Number(sessionStorage.getItem('kegel:lastImg')); } catch { /* ignore */ }
+  let i = Math.floor(Math.random() * list.length);
+  if (list.length > 1 && i === last) i = (i + 1) % list.length;
+  try { sessionStorage.setItem('kegel:lastImg', String(i)); } catch { /* ignore */ }
+  return `<img class="end-img" src="${esc(list[i])}" alt="" onerror="this.remove()">`;
 }
 function endRun() { if (R?.timer) clearInterval(R.timer); R = null; dropWake(); $('#runner').innerHTML = ''; render(); }
 
