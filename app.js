@@ -20,7 +20,7 @@ const sb = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase)
 /* ───────── stato ───────── */
 const S = {
   user: null, sessions: [], customs: [], trophies: {},
-  showAll: false, endImgs: [], endImgsAt: 0, gifUrl: '', gifAt: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
+  showAll: false, endImgs: [], endImgsAt: 0, gifs: [], gifAt: 0, gifN: 0, exTab: 'programs', authMode: 'in', ready: false, recovery: false, pf: { ex: 'all', range: 30 },
   settings: { sound: true, vibrate: true },
 };
 const LS = 'kegel-coach:v1', LSS = 'kegel-coach:settings';
@@ -506,14 +506,13 @@ function vProfile() {
       <label for="pw">Password (almeno 6 caratteri)</label><input id="pw" type="password" autocomplete="current-password">
       <div class="row" style="margin-top:18px"><button class="btn pri grow" data-act="signin">Accedi</button><button class="btn ghost grow" data-act="signup">Registrati</button></div></div>`;
   }
-  const gifBlock = cloud() ? `<div class="block"><h2>Animazione durante la contrazione</h2>
-    <p class="sm mut" style="margin-top:6px">Una GIF animata (o un'immagine) che compare dentro il cerchio quando devi contrarre. La vedi solo tu.</p>
-    ${S.gifUrl ? `<div class="gif-prev"><img src="${esc(S.gifUrl)}" alt="Anteprima animazione"></div>` : ''}
+  const gifBlock = cloud() ? `<div class="block"><h2>Animazioni durante la contrazione</h2>
+    <p class="sm mut" style="margin-top:6px">GIF animate o WebP animate che compaiono dentro il cerchio quando devi contrarre. Se ne carichi più di una, cambiano a ogni contrazione. Le vedi solo tu.</p>
+    ${S.gifs.length ? `<div class="gif-grid">${S.gifs.map((g, i) => `<div class="gif-prev"><img src="${esc(g.url)}" alt="Animazione ${i + 1}"><button class="gif-x" data-act="delGif" data-name="${esc(g.name)}" aria-label="Rimuovi animazione ${i + 1}">${icon('close')}</button></div>`).join('')}</div>` : ''}
     <div class="row wrap" style="margin-top:12px">
-      <label class="btn ghost sm" for="gifFile" style="cursor:pointer">${S.gifUrl ? 'Cambia' : 'Carica una GIF'}</label>
-      <input id="gifFile" type="file" accept="image/gif,image/webp,image/png,image/jpeg" data-change="gifFile" hidden>
-      ${S.gifUrl ? '<button class="btn ghost danger sm" data-act="delGif">Rimuovi</button>' : ''}</div>
-    <p class="fine" style="margin-top:8px">GIF, WebP, PNG o JPG · massimo 25 MB.</p></div>` : '';
+      ${S.gifs.length < GIF_MAX ? `<label class="btn ghost sm" for="gifFile" style="cursor:pointer">${S.gifs.length ? 'Aggiungi' : 'Carica animazioni'}</label>
+      <input id="gifFile" type="file" accept="image/gif,image/webp,image/png,image/jpeg" multiple data-change="gifFile" hidden>` : ''}</div>
+    <p class="fine" style="margin-top:8px">WebP, GIF, PNG o JPG · massimo 25 MB ciascuna · fino a ${GIF_MAX}.</p></div>` : '';
   const data = `<div class="block"><h2>I tuoi dati</h2><div class="row wrap" style="margin-top:12px">
     <button class="btn ghost sm" data-act="export">Esporta in JSON</button>
     ${!cloud() ? '<button class="btn ghost danger sm" data-act="resetLocal">Cancella dati locali</button>' : ''}</div></div>`;
@@ -677,9 +676,9 @@ function enterStep(first) {
   const st = R.steps[R.i], orb = $('#r-orb');
   if (!orb) return;
   $('#r-run').dataset.phase = st.t;
-  if (S.gifUrl) { // ricrea l'immagine a ogni contrazione: la GIF riparte dall'inizio
+  if (S.gifs.length) { // un'animazione diversa a ogni contrazione (a rotazione); l'img nuova riparte dall'inizio
     $('#r-run').dataset.gif = '1';
-    if (st.t === 'contract') $('#r-media').innerHTML = `<img src="${esc(S.gifUrl)}" alt="" onerror="this.remove()">`;
+    if (st.t === 'contract') $('#r-media').innerHTML = `<img src="${esc(S.gifs[S.gifN++ % S.gifs.length].url)}" alt="" onerror="this.remove()">`;
   }
   orb.style.transitionDuration = Math.min(st.d * .7, 1.6) + 's';
   orb.className = 'orb ' + (st.t === 'contract' ? 'on' : st.t === 'prep' ? 'prep' : '');
@@ -770,28 +769,24 @@ async function loadEndImages() {
     S.endImgs.forEach(u => { const im = new Image(); im.src = u; }); // precarica
   } catch { S.endImgs = []; }
 }
-/* GIF/immagine mostrata nel cerchio durante la contrazione: bucket privato "guide-media", file <ID utente>/contract.<ext> */
-const GIF_RE = /^contract\.(gif|webp|png|jpe?g)$/i;
+/* Animazioni (GIF/WebP) mostrate nel cerchio durante la contrazione: bucket privato "guide-media", file <ID utente>/contract-*.<ext> */
+const GIF_RE = /^contract.*\.(gif|webp|png|jpe?g)$/i;
 const GIF_EXT = { 'image/gif': 'gif', 'image/webp': 'webp', 'image/png': 'png', 'image/jpeg': 'jpg' };
+const GIF_MAX = 10;
 async function loadGuideGif() {
-  if (!cloud()) { S.gifUrl = ''; return; }
+  if (!cloud()) { S.gifs = []; return; }
   try {
     const bucket = sb.storage.from('guide-media');
-    const { data: files, error } = await bucket.list(S.user.id, { limit: 20 });
-    const f = !error && files ? files.find(x => GIF_RE.test(x.name)) : null;
-    if (!f) { S.gifUrl = ''; S.gifAt = Date.now(); return; }
-    const { data } = await bucket.createSignedUrl(`${S.user.id}/${f.name}`, 21600);
-    S.gifUrl = data?.signedUrl || ''; S.gifAt = Date.now();
-    if (S.gifUrl) { const im = new Image(); im.src = S.gifUrl; } // precarica
-  } catch { S.gifUrl = ''; }
+    const { data: files, error } = await bucket.list(S.user.id, { limit: 50 });
+    const names = !error && files ? files.filter(x => GIF_RE.test(x.name)).map(x => x.name).sort() : [];
+    S.gifAt = Date.now();
+    if (!names.length) { S.gifs = []; return; }
+    const { data } = await bucket.createSignedUrls(names.map(n => `${S.user.id}/${n}`), 21600);
+    S.gifs = (data || []).map((x, i) => ({ name: names[i], url: x.signedUrl })).filter(x => x.url);
+    S.gifs.forEach(g => { const im = new Image(); im.src = g.url; }); // precarica
+  } catch { S.gifs = []; }
 }
-const refreshGuideGif = () => { if (cloud() && S.gifUrl && Date.now() - (S.gifAt || 0) > 5 * 3600e3) loadGuideGif(); };
-async function removeGuideGifFiles() {
-  const bucket = sb.storage.from('guide-media');
-  const { data: files } = await bucket.list(S.user.id, { limit: 20 });
-  const old = (files || []).filter(x => GIF_RE.test(x.name)).map(x => `${S.user.id}/${x.name}`);
-  if (old.length) await bucket.remove(old);
-}
+const refreshGuideGif = () => { if (cloud() && S.gifs.length && Date.now() - (S.gifAt || 0) > 5 * 3600e3) loadGuideGif(); };
 const refreshEndImages = () => { if (cloud() && Date.now() - (S.endImgsAt || 0) > 5 * 3600e3) loadEndImages(); };
 
 function endImage() { // immagine a rotazione a fine esercizio
@@ -923,9 +918,12 @@ const ACTS = {
   saveRun,
   runNext: () => { R.qi++; loadExercise(); },
   runDone: endRun,
-  delGif: async () => {
-    try { await removeGuideGifFiles(); S.gifUrl = ''; render(); toast('Animazione rimossa'); }
-    catch (err) { toast('Non riesco a rimuoverla: ' + (err.message || err), 'err'); }
+  delGif: async el => {
+    try {
+      const { error } = await sb.storage.from('guide-media').remove([`${S.user.id}/${el.dataset.name}`]);
+      if (error) throw error;
+      S.gifs = S.gifs.filter(g => g.name !== el.dataset.name); render(); toast('Animazione rimossa');
+    } catch (err) { toast('Non riesco a rimuoverla: ' + (err.message || err), 'err'); }
   },
   editName: () => {
     $('#modal').innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="Cambia nome">
@@ -981,18 +979,22 @@ document.addEventListener('change', async e => {
   if (k === 'pfEx') { S.pf.ex = e.target.value; render(); }
   else if (k === 'pfRange') { S.pf.range = Number(e.target.value); render(); }
   else if (k === 'gifFile') {
-    const file = e.target.files?.[0]; e.target.value = '';
-    if (!file) return;
-    const ext = GIF_EXT[file.type];
-    if (!ext) return toast('Formato non supportato: usa GIF, WebP, PNG o JPG.', 'err');
-    if (file.size > 25 * 1048576) return toast('Il file supera i 25 MB.', 'err');
+    const files = [...(e.target.files || [])]; e.target.value = '';
+    if (!files.length) return;
+    let room = GIF_MAX - S.gifs.length, ok = 0;
     toast('Caricamento…');
-    try {
-      await removeGuideGifFiles();
-      const { error } = await sb.storage.from('guide-media').upload(`${S.user.id}/contract.${ext}`, file, { contentType: file.type, upsert: true, cacheControl: '3600' });
-      if (error) throw error;
-      await loadGuideGif(); render(); toast('Animazione salvata');
-    } catch (err) { toast('Caricamento non riuscito: ' + (err.message || err), 'err'); }
+    for (const file of files) {
+      const ext = GIF_EXT[file.type];
+      if (!ext) { toast(`${file.name}: formato non supportato.`, 'err'); continue; }
+      if (file.size > 25 * 1048576) { toast(`${file.name}: supera i 25 MB.`, 'err'); continue; }
+      if (room <= 0) { toast(`Massimo ${GIF_MAX} animazioni.`, 'err'); break; }
+      try {
+        const { error } = await sb.storage.from('guide-media').upload(`${S.user.id}/contract-${Date.now()}-${ok}.${ext}`, file, { contentType: file.type, cacheControl: '3600' });
+        if (error) throw error;
+        room--; ok++;
+      } catch (err) { toast('Caricamento non riuscito: ' + (err.message || err), 'err'); }
+    }
+    if (ok) { await loadGuideGif(); render(); toast(ok === 1 ? 'Animazione salvata' : `${ok} animazioni salvate`); }
   }
   else if (k === 'sound' || k === 'vibrate') { S.settings[k] = e.target.checked; saveSettings(); }
 });
@@ -1032,7 +1034,7 @@ if (sb) {
     setTimeout(async () => { // fuori dal callback, come raccomanda Supabase
       await loadData();
       if (u) await maybeImportLocal();
-      if (u) { loadEndImages(); loadGuideGif(); } else { S.endImgs = []; S.gifUrl = ''; }
+      if (u) { loadEndImages(); loadGuideGif(); } else { S.endImgs = []; S.gifs = []; }
       S.ready = true;
       if (u) await checkTrophies();
       if (u && wasOut) location.hash = '#/home';

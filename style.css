@@ -282,3 +282,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--sea)}
 .run[data-gif="1"][data-phase="contract"] .orb-txt{color:#fff;text-shadow:0 1px 10px rgba(0,0,0,.6)}
 .gif-prev{width:120px;height:120px;border-radius:50%;overflow:hidden;margin-top:14px;background:var(--line)}
 .gif-prev img{width:100%;height:100%;object-fit:cover;display:block}
+.gif-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}
+.gif-grid .gif-prev{position:relative;margin:0;width:88px;height:88px;overflow:visible;background:none}
+.gif-grid .gif-prev img{border-radius:50%;background:var(--line)}
+.gif-x{appearance:none;border:0;position:absolute;top:-4px;right:-4px;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-content:center;cursor:pointer;padding:0}
+.gif-x svg{width:14px;height:14px}
